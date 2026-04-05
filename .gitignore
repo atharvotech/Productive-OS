@@ -10,6 +10,8 @@ core/data.db
 core/database.sqlite
 *.db
 *.sqlite
+core/data.db-shm
+core/data.db-wal
 
 # Security & Config 
 core/admin_config.json

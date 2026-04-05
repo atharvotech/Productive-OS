@@ -104,15 +104,24 @@ def init_db():
             reason      TEXT    NOT NULL DEFAULT ''
         );
 
-        CREATE INDEX IF NOT EXISTS idx_screen_date ON screen_time(date);
-        CREATE INDEX IF NOT EXISTS idx_screen_app  ON screen_time(app_name);
-        CREATE INDEX IF NOT EXISTS idx_web_date    ON web_time(date);
-        CREATE INDEX IF NOT EXISTS idx_web_domain  ON web_time(domain);
-        CREATE INDEX IF NOT EXISTS idx_tokens_date ON tokens(date);
+        CREATE TABLE IF NOT EXISTS spotify_tracks (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp     TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+            date          TEXT    NOT NULL,
+            track         TEXT    NOT NULL,
+            artist        TEXT    NOT NULL DEFAULT '',
+            listen_seconds INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_screen_date  ON screen_time(date);
+        CREATE INDEX IF NOT EXISTS idx_screen_app   ON screen_time(app_name);
+        CREATE INDEX IF NOT EXISTS idx_web_date     ON web_time(date);
+        CREATE INDEX IF NOT EXISTS idx_web_domain   ON web_time(domain);
+        CREATE INDEX IF NOT EXISTS idx_tokens_date  ON tokens(date);
+        CREATE INDEX IF NOT EXISTS idx_spotify_date ON spotify_tracks(date);
     """)
-    # Seed default settings
     defaults = {
-        "focus_mode": "off",            # off | on | auto
+        "focus_mode": "off",            # off | productive | study
         "auto_focus_threshold_min": "30",
         "token_earn_rate": "30",        # tokens per hour of study
         "token_deduct_rate": "15",      # tokens per hour of gaming
@@ -121,6 +130,8 @@ def init_db():
         "whitelisted_apps": "steam.exe,steamwebhelper.exe,DesktopMate.exe,VTube Studio.exe",
         "whitelisted_channels": "",
         "blocked_apps_custom": "",
+        # Productive mode: customizable per-domain time limits (domain:minutes,...)
+        "productive_mode_timers": "reddit.com:10,youtube.com:15",
     }
     for k, v in defaults.items():
         conn.execute(
@@ -132,28 +143,84 @@ def init_db():
 # ─── Screen Time ──────────────────────────────────────────────────────────
 
 def log_screen_time(app_name: str, window_title: str, category: str, seconds: int):
+    """Log screen time. UPSERTs — if same app+category exists in the same hour,
+    adds seconds to the existing row instead of creating a duplicate."""
     now = datetime.datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    hour = now.hour
     def _write():
         conn = _get_conn()
-        conn.execute(
-            """INSERT INTO screen_time(date, hour, app_name, window_title, category, seconds)
-               VALUES(?, ?, ?, ?, ?, ?)""",
-            (now.strftime("%Y-%m-%d"), now.hour, app_name, window_title, category, seconds),
-        )
+        # Try to find a recent matching row (same date, hour, app_name, category)
+        existing = conn.execute(
+            """SELECT id, seconds FROM screen_time
+               WHERE date = ? AND hour = ? AND app_name = ? AND category = ?
+               ORDER BY id DESC LIMIT 1""",
+            (date_str, hour, app_name, category),
+        ).fetchone()
+        if existing:
+            # Update existing row — add seconds, update title to latest
+            conn.execute(
+                """UPDATE screen_time SET seconds = seconds + ?,
+                   window_title = ?, timestamp = datetime('now','localtime')
+                   WHERE id = ?""",
+                (seconds, window_title, existing["id"]),
+            )
+        else:
+            # Insert new row
+            conn.execute(
+                """INSERT INTO screen_time(date, hour, app_name, window_title, category, seconds)
+                   VALUES(?, ?, ?, ?, ?, ?)""",
+                (date_str, hour, app_name, window_title, category, seconds),
+            )
         conn.commit()
     _retry_write(_write)
 
 
 def get_screen_time_stats(date: str) -> list:
-    """Aggregate screen time by app for a given date."""
+    """Aggregate screen time by app for a given date.
+    Merges desktop app screen_time with web domain time from the extension.
+    Browser apps are no longer in screen_time (extension handles them via web_time)."""
     conn = _get_conn()
+    # Desktop apps (non-browser)
     rows = conn.execute(
-        """SELECT app_name, category, SUM(seconds) as total_sec
+        """SELECT app_name as app_display, category, SUM(seconds) as total_sec
            FROM screen_time WHERE date = ?
            GROUP BY app_name ORDER BY total_sec DESC""",
         (date,),
     ).fetchall()
-    return [dict(r) for r in rows]
+    combined = {}
+    for r in rows:
+        key = r["app_display"]
+        combined[key] = {"app_name": key, "category": r["category"], "total_sec": r["total_sec"], "sub_items": []}
+
+    # Web domains from extension — collapse under "Google Chrome"
+    web_rows = conn.execute(
+        """SELECT domain as app_display, category, SUM(seconds) as total_sec
+           FROM web_time WHERE date = ? AND category != 'blocked'
+           GROUP BY domain ORDER BY total_sec DESC""",
+        (date,),
+    ).fetchall()
+    
+    chrome_sum = 0
+    chrome_subs = []
+    for r in web_rows:
+        chrome_subs.append({
+            "app_name": r["app_display"],
+            "category": r["category"],
+            "total_sec": r["total_sec"]
+        })
+        chrome_sum += r["total_sec"]
+        
+    if chrome_sum > 0:
+        # Determine dominant category for Chrome based on highest usage
+        dominant_category = chrome_subs[0]["category"] if chrome_subs else "productivity"
+        if "Google Chrome" not in combined:
+            combined["Google Chrome"] = {"app_name": "Google Chrome", "category": dominant_category, "total_sec": 0, "sub_items": []}
+        
+        combined["Google Chrome"]["total_sec"] += chrome_sum
+        combined["Google Chrome"]["sub_items"] = chrome_subs
+
+    return sorted(combined.values(), key=lambda x: x["total_sec"], reverse=True)
 
 
 def get_hourly_breakdown(date: str) -> list:
@@ -182,14 +249,30 @@ def get_hourly_breakdown(date: str) -> list:
 
 
 def get_top_apps(date: str, limit: int = 10) -> list:
+    """Top apps by time — merges desktop screen_time with web_time domain data."""
     conn = _get_conn()
-    rows = conn.execute(
-        """SELECT app_name, category, SUM(seconds) as total_sec
-           FROM screen_time WHERE date = ?
-           GROUP BY app_name ORDER BY total_sec DESC LIMIT ?""",
-        (date, limit),
-    ).fetchall()
-    return [dict(r) for r in rows]
+    combined = {}
+    # Desktop apps
+    for r in conn.execute(
+        "SELECT app_name, category, SUM(seconds) as total_sec FROM screen_time WHERE date=? GROUP BY app_name",
+        (date,),
+    ).fetchall():
+        combined[r["app_name"]] = {"app_name": r["app_name"], "category": r["category"], "total_sec": r["total_sec"]}
+    # Web domains (browsers handled by extension) -> treat individually for Top Apps or merge?
+    # For Top Apps, if we want them merged into Chrome:
+    web_total = sum(r["total_sec"] for r in conn.execute(
+        "SELECT SUM(seconds) as total_sec FROM web_time WHERE date=? AND category!='blocked'",
+        (date,)
+    ).fetchall() if r["total_sec"])
+    
+    if web_total and web_total > 0:
+        if "Google Chrome" in combined:
+            combined["Google Chrome"]["total_sec"] += web_total
+        else:
+            combined["Google Chrome"] = {"app_name": "Google Chrome", "category": "productivity", "total_sec": web_total}
+            
+    sorted_apps = sorted(combined.values(), key=lambda x: x["total_sec"], reverse=True)
+    return sorted_apps[:limit]
 
 
 def get_category_totals(date: str) -> dict:
@@ -286,14 +369,33 @@ def get_yearly_stats(year: int) -> list:
 # ─── Web Time ─────────────────────────────────────────────────────────────
 
 def log_web_time(domain: str, url: str, page_title: str, category: str, seconds: int):
+    """Log web time. UPSERTs — if same domain+url exists in the same hour,
+    adds seconds to the existing row instead of creating a duplicate."""
     now = datetime.datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    hour = now.hour
     def _write():
         conn = _get_conn()
-        conn.execute(
-            """INSERT INTO web_time(date, hour, domain, url, page_title, category, seconds)
-               VALUES(?, ?, ?, ?, ?, ?, ?)""",
-            (now.strftime("%Y-%m-%d"), now.hour, domain, url, page_title, category, seconds),
-        )
+        # Try to find a recent matching row (same date, hour, domain, url)
+        existing = conn.execute(
+            """SELECT id, seconds FROM web_time
+               WHERE date = ? AND hour = ? AND domain = ? AND url = ?
+               ORDER BY id DESC LIMIT 1""",
+            (date_str, hour, domain, url),
+        ).fetchone()
+        if existing:
+            # Update existing row — add seconds
+            conn.execute(
+                "UPDATE web_time SET seconds = seconds + ?, timestamp = datetime('now','localtime') WHERE id = ?",
+                (seconds, existing["id"]),
+            )
+        else:
+            # Insert new row
+            conn.execute(
+                """INSERT INTO web_time(date, hour, domain, url, page_title, category, seconds)
+                   VALUES(?, ?, ?, ?, ?, ?, ?)""",
+                (date_str, hour, domain, url, page_title, category, seconds),
+            )
         conn.commit()
     _retry_write(_write)
 
@@ -449,13 +551,16 @@ def log_killed_process(process_name: str, reason: str = ""):
 # ─── Recent Web Activity ─────────────────────────────────────────────────
 
 def get_recent_web_activity(limit: int = 20) -> list:
-    """Return the most recent web activity entries (newest first)."""
+    """Return the most recent web activity entries, aggregated by domain+page_title.
+    Shows one entry per page with total accumulated time."""
     conn = _get_conn()
     rows = conn.execute(
-        """SELECT timestamp, domain, url, page_title, category, seconds
+        """SELECT MAX(timestamp) as timestamp, domain, url, page_title,
+                  category, SUM(seconds) as seconds
            FROM web_time
            WHERE category != 'blocked'
-           ORDER BY id DESC LIMIT ?""",
+           GROUP BY domain, page_title
+           ORDER BY MAX(id) DESC LIMIT ?""",
         (limit,),
     ).fetchall()
     return [dict(r) for r in rows]
@@ -466,7 +571,56 @@ def get_spotify_screen_time(date: str) -> int:
     conn = _get_conn()
     row = conn.execute(
         """SELECT COALESCE(SUM(seconds), 0) as total_sec
-           FROM screen_time WHERE date = ? AND LOWER(app_name) = 'spotify.exe'""",
+           FROM screen_time WHERE date = ?
+           AND (LOWER(app_name) = 'spotify.exe' OR LOWER(app_name) = 'spotify')""",
         (date,),
     ).fetchone()
     return row["total_sec"] if row else 0
+
+
+# ─── Spotify Tracks ───────────────────────────────────────────────────────
+
+def log_spotify_track(date: str, track: str, artist: str, seconds: int):
+    """Persist Spotify listening time. UPSERTs — same track+artist+date accumulates."""
+    if not track or seconds <= 0:
+        return
+    def _write():
+        conn = _get_conn()
+        existing = conn.execute(
+            """SELECT id FROM spotify_tracks
+               WHERE date = ? AND track = ? AND artist = ?
+               ORDER BY id DESC LIMIT 1""",
+            (date, track, artist),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """UPDATE spotify_tracks
+                   SET listen_seconds = listen_seconds + ?,
+                       timestamp = datetime('now','localtime')
+                   WHERE id = ?""",
+                (seconds, existing["id"]),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO spotify_tracks(date, track, artist, listen_seconds)
+                   VALUES(?, ?, ?, ?)""",
+                (date, track, artist, seconds),
+            )
+        conn.commit()
+    _retry_write(_write)
+
+
+def get_spotify_tracks(date: str, limit: int = 50) -> list:
+    """Return Spotify tracks listened to on a given date, most recent first."""
+    conn = _get_conn()
+    rows = conn.execute(
+        """SELECT timestamp, track, artist, listen_seconds
+           FROM spotify_tracks WHERE date = ?
+           ORDER BY id DESC LIMIT ?""",
+        (date, limit),
+    ).fetchall()
+    return [
+        {"time": r["timestamp"], "track": r["track"],
+         "artist": r["artist"], "duration": r["listen_seconds"]}
+        for r in rows
+    ]

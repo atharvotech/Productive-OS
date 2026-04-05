@@ -2,12 +2,17 @@
  * Focus Engine Pro — Chrome Extension Background Service Worker
  * 
  * Tracks time spent per domain, syncs to Python WebSocket server every 30s,
- * blocks distraction URLs (always-on + focus mode enhanced),
- * and manages focus mode state from the server.
+ * blocks distraction URLs based on current mode (off/productive/study),
+ * and manages mode state from the server.
+ * 
+ * Modes:
+ *   - OFF: Only always-blocked content (adult sites)
+ *   - PRODUCTIVE: Soft blocks with time limits + reminders (e.g. Reddit 10min)
+ *   - STUDY: Full blockage, strict rules
  * 
  * IMPORTANT: Only tracks time when:
  * 1. The Chrome window is FOCUSED (foreground)
- * 2. For "study" sites, the window must be MAXIMIZED (anti-split-screen cheat)
+ * 2. For "study" sites in STUDY mode, the window must be MAXIMIZED
  */
 
 // ─── Configuration ───────────────────────────────────────────────────────
@@ -16,15 +21,15 @@ const WS_URL = "ws://localhost:8765";
 const SYNC_INTERVAL_SEC = 30;
 const FOCUS_CHECK_INTERVAL_SEC = 15;
 
-// Always-blocked URL keywords (even outside focus mode)
+// Always-blocked URL keywords (even outside any mode)
 const ALWAYS_BLOCKED_KEYWORDS = [
   "pornhub", "xvideos", "xnxx", "xhamster", "redtube",
   "youporn", "spankbang", "brazzers", "onlyfans",
   "tiktok.com", "/reels", "/shorts",
 ];
 
-// Focus-mode blocked domains
-const FOCUS_BLOCKED_DOMAINS = [
+// Study-mode blocked domains (fully blocked in study mode)
+const STUDY_BLOCKED_DOMAINS = [
   "instagram.com", "facebook.com", "twitter.com", "x.com",
   "reddit.com", "snapchat.com", "pinterest.com", "tumblr.com",
   "twitch.tv", "netflix.com", "disneyplus.com", "hotstar.com",
@@ -33,16 +38,27 @@ const FOCUS_BLOCKED_DOMAINS = [
   "9gag.com", "buzzfeed.com", "imgur.com",
 ];
 
+// Productive-mode: always blocked even in productive mode
+const PRODUCTIVE_ALWAYS_BLOCKED = [
+  "instagram.com", "snapchat.com", "tiktok.com",
+];
+
+// Productive-mode: allowed with time limits (defaults, server can override)
+const PRODUCTIVE_TIMED_DEFAULTS = {
+  "reddit.com": 10,     // 10 minutes
+  "youtube.com": 15,    // 15 minutes (non-study content)
+};
+
 // Focus-mode blocked URL keywords
-const FOCUS_BLOCKED_KEYWORDS = [
+const BLOCKED_TITLE_KEYWORDS = [
   "gaming", "gameplay", "walkthrough", "let's play",
   "fortnite", "valorant", "gta", "minecraft",
-  "movie", "trailer",  "memes", "funny",
+  "movie", "trailer", "memes", "funny",
   "unboxing", "haul", "vlog", "mukbang",
   "asmr",
 ];
 
-// Study-safe domains (never blocked, even in focus mode)
+// Study-safe domains (never blocked in any mode)
 const STUDY_SAFE_DOMAINS = [
   "stackoverflow.com", "github.com", "gitlab.com",
   "docs.python.org", "docs.microsoft.com", "learn.microsoft.com",
@@ -54,9 +70,13 @@ const STUDY_SAFE_DOMAINS = [
   "npmjs.com", "pypi.org", "crates.io",
   "arxiv.org", "scholar.google.com", "wikipedia.org",
   "medium.com", "dev.to", "hashnode.dev",
-  "localhost", "127.0.0.1",
-  "chat.openai.com", "gemini.google.com", "claude.ai",
+
   "colab.research.google.com",
+];
+
+// Productivity tools (AI chat, generic work apps)
+const PRODUCTIVITY_DOMAINS = [
+  "chat.openai.com", "gemini.google.com", "claude.ai", "chatgpt.com", "localhost", "127.0.0.1",
 ];
 
 // Whitelisted YouTube channel patterns (user can add more via settings)
@@ -72,13 +92,18 @@ let activeTabDomain = "";
 let activeTabUrl = "";
 let activeTabTitle = "";
 let lastTickTime = Date.now();
-let focusMode = false;
+let currentMode = "off";     // "off" | "productive" | "study"
 let wsConnection = null;
 let wsConnected = false;
 let reconnectTimer = null;
 let reconnectDelay = 1000;
-let browserHasFocus = true;   // Whether ANY Chrome window is focused
-let activeWindowState = "maximized"; // Current window state
+let browserHasFocus = true;
+let activeWindowState = "maximized";
+
+// Productive mode domain timers { domain: { startTime, limitMinutes, reminded } }
+let domainTimers = {};
+// Productive mode time limits from server
+let productiveTimers = { ...PRODUCTIVE_TIMED_DEFAULTS };
 
 // ─── WebSocket Connection ────────────────────────────────────────────────
 
@@ -92,9 +117,7 @@ function connectWebSocket() {
       console.log("[FEP] WebSocket connected");
       wsConnected = true;
       reconnectDelay = 1000;
-      // Immediately check focus mode
       sendWS({ action: "get_focus_mode" });
-      // Load whitelisted channels & websites
       sendWS({ action: "get_settings" });
     };
 
@@ -136,22 +159,35 @@ function sendWS(data) {
 
 function handleServerMessage(data) {
   if (data.action === "focus_mode") {
-    const newMode = data.mode === "on";
-    if (newMode !== focusMode) {
-      focusMode = newMode;
-      chrome.storage.local.set({ focusMode });
-      console.log(`[FEP] Focus mode: ${focusMode ? "ON" : "OFF"}`);
+    const newMode = data.mode || "off";  // "off" | "productive" | "study"
+    if (newMode !== currentMode) {
+      currentMode = newMode;
+      chrome.storage.local.set({ currentMode });
+      console.log(`[FEP] Mode: ${currentMode}`);
+      // Reset domain timers when mode changes
+      domainTimers = {};
+    }
+    // Load productive timers from server
+    if (data.productive_timers) {
+      productiveTimers = { ...PRODUCTIVE_TIMED_DEFAULTS, ...data.productive_timers };
     }
   } else if (data.action === "focus_mode_changed") {
-    focusMode = data.mode === "on";
-    chrome.storage.local.set({ focusMode });
+    currentMode = data.mode || "off";
+    chrome.storage.local.set({ currentMode });
+    domainTimers = {};
   } else if (data.action === "settings") {
-    // Load whitelisted channels
     const channels = data.data?.whitelisted_channels || "";
     whitelistedChannels = channels.split(",").map(c => c.trim().toLowerCase()).filter(Boolean);
-    // Load whitelisted websites
     const websites = data.data?.whitelisted_websites || "";
     whitelistedWebsites = websites.split(",").map(w => w.trim().toLowerCase()).filter(Boolean);
+    // Load productive timers from settings
+    const timersStr = data.data?.productive_mode_timers || "";
+    if (timersStr) {
+      timersStr.split(",").forEach(entry => {
+        const [d, m] = entry.split(":");
+        if (d && m) productiveTimers[d.trim()] = parseInt(m.trim());
+      });
+    }
   }
 }
 
@@ -159,10 +195,13 @@ function handleServerMessage(data) {
 
 function getDomain(url) {
   try {
+    if (url.startsWith("chrome://newtab") || url.startsWith("edge://newtab")) {
+      return "New Tab";
+    }
     const u = new URL(url);
     return u.hostname.replace("www.", "");
   } catch {
-    return "";
+    return url.startsWith("chrome:") || url.startsWith("edge:") ? "New Tab" : "";
   }
 }
 
@@ -171,10 +210,6 @@ function tickTime() {
   const elapsed = Math.round((now - lastTickTime) / 1000);
   lastTickTime = now;
 
-  // ONLY count time if:
-  // 1. Chrome has focus (browser is foreground app)
-  // 2. There is an active tab with a domain
-  // 3. Elapsed time is reasonable (< 5 min, handles sleep/lock)
   if (browserHasFocus && activeTabDomain && elapsed > 0 && elapsed < 300) {
     if (!timeData[activeTabDomain]) {
       timeData[activeTabDomain] = { seconds: 0, url: "", title: "" };
@@ -182,6 +217,11 @@ function tickTime() {
     timeData[activeTabDomain].seconds += elapsed;
     timeData[activeTabDomain].url = activeTabUrl;
     timeData[activeTabDomain].title = activeTabTitle;
+
+    // Track productive mode domain timers
+    if (currentMode === "productive") {
+      checkProductiveTimer(activeTabDomain, elapsed);
+    }
   }
 }
 
@@ -194,29 +234,141 @@ function updateActiveTab() {
       activeTabTitle = tab.title || "";
       activeTabDomain = getDomain(activeTabUrl);
 
-      // Also check window state for the tab's window
       if (tab.windowId) {
         chrome.windows.get(tab.windowId, (win) => {
           if (chrome.runtime.lastError) return;
-          activeWindowState = win.state; // "normal", "maximized", "minimized", "fullscreen"
+          activeWindowState = win.state;
         });
       }
     }
   });
 }
 
+// ─── Productive Mode Timer Logic ─────────────────────────────────────────
+
+function checkProductiveTimer(domain, elapsedSec) {
+  // Check if this domain has a time limit in productive mode
+  let matchedDomain = null;
+  for (const timedDomain of Object.keys(productiveTimers)) {
+    if (domain.includes(timedDomain)) {
+      matchedDomain = timedDomain;
+      break;
+    }
+  }
+  if (!matchedDomain) return; // No timer for this domain
+
+  // Skip study-safe domains
+  if (STUDY_SAFE_DOMAINS.some(sd => domain.includes(sd))) return;
+
+  // Initialize timer for this domain
+  if (!domainTimers[matchedDomain]) {
+    domainTimers[matchedDomain] = {
+      startTime: Date.now(),
+      accumulatedSec: 0,
+      limitMinutes: productiveTimers[matchedDomain],
+      reminded: false,
+    };
+  }
+
+  const timer = domainTimers[matchedDomain];
+  timer.accumulatedSec += elapsedSec;
+  const minutesSpent = timer.accumulatedSec / 60;
+
+  // Check if time limit exceeded
+  if (minutesSpent >= timer.limitMinutes && !timer.reminded) {
+    timer.reminded = true;
+    // Show a notification reminder
+    showProductiveReminder(matchedDomain, Math.round(minutesSpent));
+  }
+}
+
+function showProductiveReminder(domain, minutes) {
+  // Send notification
+  try {
+    chrome.notifications.create(`productive_${domain}`, {
+      type: "basic",
+      iconUrl: "icon.png",
+      title: "🕐 Focus Engine Pro — Time Check",
+      message: `You've been on ${domain} for ${minutes} minutes. Are you still working?`,
+      priority: 2,
+      requireInteraction: true,
+    });
+  } catch (e) {
+    console.log("[FEP] Notification error:", e);
+  }
+
+  // Also inject a gentle overlay reminder into the active tab
+  if (activeTabId) {
+    try {
+      chrome.scripting.executeScript({
+        target: { tabId: activeTabId },
+        func: (domain, minutes) => {
+          // Remove existing reminder if any
+          document.getElementById("fep-productive-reminder")?.remove();
+          
+          const overlay = document.createElement("div");
+          overlay.id = "fep-productive-reminder";
+          overlay.innerHTML = `
+            <div style="position:fixed;top:20px;right:20px;z-index:999999;
+                 background:linear-gradient(135deg,rgba(6,182,212,0.95),rgba(124,58,237,0.95));
+                 color:#fff;padding:16px 24px;border-radius:16px;
+                 font-family:'Segoe UI',Inter,sans-serif;font-size:14px;
+                 box-shadow:0 8px 32px rgba(0,0,0,0.3);max-width:380px;
+                 animation:slideInRight 0.4s ease;backdrop-filter:blur(12px);">
+              <style>@keyframes slideInRight{from{opacity:0;transform:translateX(100px)}to{opacity:1;transform:translateX(0)}}</style>
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <span style="font-size:24px">🕐</span>
+                <strong style="font-size:15px">Time Check!</strong>
+              </div>
+              <p style="margin:0 0 12px;opacity:0.9;line-height:1.4">
+                You've been on <strong>${domain}</strong> for <strong>${minutes} min</strong>. Are you still working?
+              </p>
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button onclick="this.closest('#fep-productive-reminder').remove()"
+                  style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.3);
+                         color:#fff;padding:6px 16px;border-radius:8px;cursor:pointer;font-size:13px;">
+                  Got it
+                </button>
+              </div>
+            </div>`;
+          document.body.appendChild(overlay);
+          // Auto-remove after 30 seconds
+          setTimeout(() => overlay.remove(), 30000);
+        },
+        args: [domain, minutes],
+      });
+    } catch (e) {
+      console.log("[FEP] Script injection error:", e);
+    }
+  }
+}
+
 // ─── Sync to Server ──────────────────────────────────────────────────────
 
 function syncTimeData() {
-  tickTime(); // Final tick before sync
+  tickTime();
 
   for (const [domain, data] of Object.entries(timeData)) {
     if (data.seconds > 0) {
       const isMaximized = activeWindowState === "maximized" || activeWindowState === "fullscreen";
-      const category = classifyDomain(domain, data.title, isMaximized);
+      let category = classifyDomain(domain, data.title, isMaximized);
+      let finalDomain = domain;
+
+      // Special segregation for YouTube into distinct logged apps
+      if (domain.includes("youtube.com")) {
+        if (data.url.toLowerCase().includes("/shorts")) {
+          finalDomain = "YouTube Shorts";
+          category = "entertainment";
+        } else if (category === "study" || category === "productivity") {
+          finalDomain = "YouTube (Study)";
+        } else {
+          finalDomain = "YouTube";
+        }
+      }
+
       sendWS({
         action: "log_web_time",
-        domain: domain,
+        domain: finalDomain,
         url: data.url,
         title: data.title,
         seconds: data.seconds,
@@ -234,44 +386,45 @@ function classifyDomain(domain, title = "", isMaximized = true) {
   // Check user-whitelisted websites first
   for (const wl of whitelistedWebsites) {
     if (d.includes(wl)) {
-      return isMaximized ? "study" : "productivity";
+      return (currentMode === "study" && !isMaximized) ? "productivity" : "study";
     }
+  }
+
+  // Productivity
+  if (PRODUCTIVITY_DOMAINS.some(pd => d.includes(pd))) {
+    return "productivity";
   }
 
   // Study sites
   if (STUDY_SAFE_DOMAINS.some(sd => d.includes(sd))) {
-    return isMaximized ? "study" : "productivity";
+    return (currentMode === "study" && !isMaximized) ? "productivity" : "study";
   }
 
   // Social media
-  if (FOCUS_BLOCKED_DOMAINS.some(bd => d.includes(bd) && 
+  if (STUDY_BLOCKED_DOMAINS.some(bd => d.includes(bd) && 
       ["instagram", "facebook", "twitter", "x.com", "reddit", "snapchat", "pinterest", "tumblr"]
         .some(s => bd.includes(s)))) return "social";
 
   // Entertainment
-  if (FOCUS_BLOCKED_DOMAINS.some(bd => d.includes(bd))) return "entertainment";
+  if (STUDY_BLOCKED_DOMAINS.some(bd => d.includes(bd))) return "entertainment";
 
-  // YouTube — classify by title + whitelisted channels
+  // YouTube
   if (d.includes("youtube.com")) {
-    // Check whitelisted channels
     if (whitelistedChannels.length > 0) {
-      const isWhitelistedChannel = whitelistedChannels.some(ch => 
-        t.includes(ch)
-      );
+      const isWhitelistedChannel = whitelistedChannels.some(ch => t.includes(ch));
       if (isWhitelistedChannel) {
-        return isMaximized ? "study" : "productivity";
+        return (currentMode === "study" && !isMaximized) ? "productivity" : "study";
       }
     }
-    // Check study keywords in title
     if (STUDY_SAFE_KEYWORDS_IN_TITLE(t)) {
-      return isMaximized ? "study" : "productivity";
+      return (currentMode === "study" && !isMaximized) ? "productivity" : "study";
     }
-    if (FOCUS_BLOCKED_KEYWORDS.some(kw => t.includes(kw))) return "entertainment";
-    return "entertainment"; // Default YouTube = entertainment
+    if (BLOCKED_TITLE_KEYWORDS.some(kw => t.includes(kw))) return "entertainment";
+    return "entertainment";
   }
 
   // Gaming
-  if (FOCUS_BLOCKED_KEYWORDS.some(kw => t.includes(kw) || d.includes(kw))) return "gaming";
+  if (BLOCKED_TITLE_KEYWORDS.some(kw => t.includes(kw) || d.includes(kw))) return "gaming";
 
   return "other";
 }
@@ -291,7 +444,10 @@ function STUDY_SAFE_KEYWORDS_IN_TITLE(title) {
 // ─── URL Blocking ────────────────────────────────────────────────────────
 
 function shouldBlockUrl(url, title = "") {
-  if (!url || url.startsWith("chrome://") || url.startsWith("chrome-extension://")) {
+  if (!url || url.startsWith("chrome-extension://")) {
+    return { block: false, reason: "" };
+  }
+  if (url.startsWith("chrome://") && !url.includes("newtab")) {
     return { block: false, reason: "" };
   }
 
@@ -306,50 +462,61 @@ function shouldBlockUrl(url, title = "") {
     }
   }
 
-  // Focus mode blocking
-  if (focusMode) {
-    // Check if study-safe
-    if (STUDY_SAFE_DOMAINS.some(sd => domain.includes(sd))) {
+  // ── STUDY MODE: Full blockage ──────────────────────────────────────
+  if (currentMode === "study") {
+    // Check if study-safe or productivity apps
+    if (STUDY_SAFE_DOMAINS.some(sd => domain.includes(sd)) || PRODUCTIVITY_DOMAINS.some(pd => domain.includes(pd))) {
       return { block: false, reason: "" };
     }
-
     // Check user-whitelisted websites
     for (const wl of whitelistedWebsites) {
-      if (domain.includes(wl)) {
-        return { block: false, reason: "" };
-      }
+      if (domain.includes(wl)) return { block: false, reason: "" };
     }
-
     // YouTube special handling
     if (domain.includes("youtube.com")) {
-      // Allow whitelisted channels
       if (whitelistedChannels.length > 0) {
         const isWhitelisted = whitelistedChannels.some(ch => 
           urlLower.includes(ch) || titleLower.includes(ch)
         );
         if (isWhitelisted) return { block: false, reason: "" };
       }
-      // Allow study content by title
       if (STUDY_SAFE_KEYWORDS_IN_TITLE(titleLower)) {
         return { block: false, reason: "" };
       }
-      // Block non-study YouTube in focus mode
-      return { block: true, reason: "YouTube non-study content blocked in Focus Mode" };
+      return { block: true, reason: "YouTube non-study content blocked in Study Mode" };
     }
-
     // Block social/entertainment domains
-    for (const bd of FOCUS_BLOCKED_DOMAINS) {
+    for (const bd of STUDY_BLOCKED_DOMAINS) {
       if (domain.includes(bd)) {
-        return { block: true, reason: `${bd} blocked in Focus Mode` };
+        return { block: true, reason: `${bd} blocked in Study Mode` };
       }
     }
-
     // Block by title keywords
-    for (const kw of FOCUS_BLOCKED_KEYWORDS) {
+    for (const kw of BLOCKED_TITLE_KEYWORDS) {
       if (titleLower.includes(kw) || urlLower.includes(kw)) {
-        return { block: true, reason: `Content keyword "${kw}" blocked in Focus Mode` };
+        return { block: true, reason: `Content keyword "${kw}" blocked in Study Mode` };
       }
     }
+  }
+
+  // ── PRODUCTIVE MODE: Soft blocks ───────────────────────────────────
+  if (currentMode === "productive") {
+    // Always block these even in productive mode
+    for (const bd of PRODUCTIVE_ALWAYS_BLOCKED) {
+      if (domain.includes(bd)) {
+        return { block: true, reason: `${bd} blocked in Productive Mode` };
+      }
+    }
+    // Study-safe domains are always allowed
+    if (STUDY_SAFE_DOMAINS.some(sd => domain.includes(sd))) {
+      return { block: false, reason: "" };
+    }
+    for (const wl of whitelistedWebsites) {
+      if (domain.includes(wl)) return { block: false, reason: "" };
+    }
+    // Timed domains (reddit, youtube) — allow but track time
+    // The timer logic runs in tickTime, not here
+    // Don't block, just let the timer handle reminders
   }
 
   return { block: false, reason: "" };
@@ -358,15 +525,13 @@ function shouldBlockUrl(url, title = "") {
 // ─── Navigation Blocking ─────────────────────────────────────────────────
 
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
-  if (details.frameId !== 0) return; // Only main frame
+  if (details.frameId !== 0) return;
 
   const { block, reason } = shouldBlockUrl(details.url);
   if (block) {
-    // Redirect to blocked page
     const blockedHtml = `data:text/html,${encodeURIComponent(getBlockedPageHTML(reason))}`;
     chrome.tabs.update(details.tabId, { url: blockedHtml });
 
-    // Log the blocked attempt
     const domain = getDomain(details.url);
     sendWS({
       action: "log_web_time",
@@ -393,6 +558,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 function getBlockedPageHTML(reason) {
+  const modeLabel = currentMode === "study" ? "Study Mode" : "Productive Mode";
   return `
 <!DOCTYPE html>
 <html>
@@ -421,6 +587,17 @@ function getBlockedPageHTML(reason) {
     }
     .icon { font-size: 4rem; margin-bottom: 1rem; }
     h1 { font-size: 1.8rem; margin-bottom: 0.5rem; color: #f87171; }
+    .mode-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      background: ${currentMode === "study" ? "rgba(16,185,129,0.2)" : "rgba(6,182,212,0.2)"};
+      color: ${currentMode === "study" ? "#10b981" : "#06b6d4"};
+      border: 1px solid ${currentMode === "study" ? "rgba(16,185,129,0.3)" : "rgba(6,182,212,0.3)"};
+    }
     p { color: rgba(255,255,255,0.7); margin-bottom: 1.5rem; line-height: 1.6; }
     .reason {
       background: rgba(248,113,113,0.15);
@@ -442,6 +619,7 @@ function getBlockedPageHTML(reason) {
   <div class="container">
     <div class="icon">🚫</div>
     <h1>Get Back to Work!</h1>
+    <div class="mode-badge">${modeLabel} Active</div>
     <p>This page has been blocked by Focus Engine Pro.</p>
     <div class="reason">${reason}</div>
     <p class="quote">"The secret of getting ahead is getting started." — Mark Twain</p>
@@ -460,14 +638,10 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 chrome.windows.onFocusChanged.addListener((windowId) => {
   tickTime();
   if (windowId === chrome.windows.WINDOW_ID_NONE) {
-    // Chrome has LOST FOCUS — user switched to another app
-    // STOP counting time for web tabs
     browserHasFocus = false;
     activeTabDomain = "";
   } else {
-    // Chrome regained focus
     browserHasFocus = true;
-    // Check window state (maximized/normal/etc)
     chrome.windows.get(windowId, (win) => {
       if (chrome.runtime.lastError) return;
       activeWindowState = win.state;
@@ -494,13 +668,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const { block, reason } = shouldBlockUrl(url, title);
     
     if (block) {
-      // Tell content script to show overlay
       sendResponse({ action: "block", reason: reason });
     } else {
       sendResponse({ action: "allow" });
     }
   }
-  return true; // Keep channel open for async response
+  return true;
 });
 
 // ─── Alarms (periodic tasks) ─────────────────────────────────────────────
@@ -522,15 +695,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // ─── Initialize ──────────────────────────────────────────────────────────
 
-// Load stored focus mode state
-chrome.storage.local.get(["focusMode"], (result) => {
-  focusMode = result.focusMode || false;
+chrome.storage.local.get(["currentMode"], (result) => {
+  currentMode = result.currentMode || "off";
 });
 
-// Connect to server
 connectWebSocket();
-
-// Initial tab check
 updateActiveTab();
 
-console.log("[FEP] Focus Engine Pro extension loaded");
+console.log("[FEP] Focus Engine Pro extension loaded (dual mode)");

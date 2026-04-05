@@ -42,6 +42,74 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         super().end_headers()
 
+    def do_GET(self):
+        from urllib.parse import urlparse, parse_qs
+        import json
+        import socket
+        import asyncio
+        
+        parsed_path = urlparse(self.path)
+        
+        # Intercept YouTube channel search from the dashboard
+        if parsed_path.path == '/api/v1/search':
+            query_components = parse_qs(parsed_path.query)
+            query = query_components.get('q', [''])[0]
+            
+            try:
+                # 1. Provide an event loop for youtubesearchpython internal httpx
+                try:
+                    asyncio.get_event_loop()
+                except RuntimeError:
+                    asyncio.set_event_loop(asyncio.new_event_loop())
+
+                # 2. Monkey-patch socket to force IPv4 and bypass Python's 60-second IPv6 timeout on Windows
+                original_getaddrinfo = socket.getaddrinfo
+                def ipv4_getaddrinfo(*args, **kwargs):
+                    responses = original_getaddrinfo(*args, **kwargs)
+                    return [r for r in responses if r[0] == socket.AF_INET]
+                socket.getaddrinfo = ipv4_getaddrinfo
+
+                try:
+                    from youtubesearchpython import ChannelsSearch
+                    channel_search = ChannelsSearch(query, limit=8)
+                    results = channel_search.result()
+                finally:
+                    # Always restore the original socket function
+                    socket.getaddrinfo = original_getaddrinfo
+                
+                # Format to match Invidious API response for compatibility with app.js
+                response_data = []
+                for ch in results.get('result', []):
+                    thumb_url = ""
+                    if ch.get('thumbnails') and len(ch['thumbnails']) > 0:
+                        thumb_url = ch['thumbnails'][0]['url']
+                        if thumb_url.startswith('//'):
+                            thumb_url = 'https:' + thumb_url
+                            
+                    response_data.append({
+                        "author": ch.get('title', 'Unknown Channel'),
+                        "description": ch.get('descriptionSnippet', [{}])[0].get('text', '') if ch.get('descriptionSnippet') else '',
+                        "authorThumbnails": [{"url": thumb_url}],
+                        "subCount": ch.get('subscribers', '')
+                    })
+                
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                # Access-Control-Allow-Origin is handled automatically by self.end_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps(response_data).encode('utf-8'))
+                return
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+                return
+                
+        # For all other paths, serve static files
+        super().do_GET()
+
+
 
 def start_http_server(port: int = 8080):
     """Start the HTTP server for the dashboard in a daemon thread."""
@@ -122,11 +190,19 @@ class APIServer:
             mode = db.get_setting("focus_mode", "off")
             gaming_min = self.app_killer.get_gaming_minutes() if self.app_killer else 0
             warning = db.get_setting("gaming_warning", "")
+            # Load productive mode timers
+            timers_raw = db.get_setting("productive_mode_timers", "reddit.com:10,youtube.com:15")
+            timers = {}
+            for entry in timers_raw.split(","):
+                if ":" in entry:
+                    d, m = entry.strip().split(":", 1)
+                    timers[d.strip()] = int(m.strip())
             return {
                 "action": "focus_mode",
-                "mode": mode,
+                "mode": mode,  # "off" | "productive" | "study"
                 "gaming_minutes": round(gaming_min, 1),
                 "warning": warning,
+                "productive_timers": timers,
             }
 
         elif action == "get_blocked_apps":
@@ -175,6 +251,11 @@ class APIServer:
             limit = data.get("limit", 20)
             return {"action": "recent_web", "data": db.get_recent_web_activity(limit)}
 
+        elif action == "get_recent_activities":
+            if self.tracker:
+                return {"action": "recent_activities", "data": self.tracker.get_recent_activities()}
+            return {"action": "recent_activities", "data": []}
+
         elif action == "get_streak":
             return {"action": "streak", "days": db.get_streak()}
 
@@ -208,20 +289,39 @@ class APIServer:
             lockout = self.auth.get_lockout_remaining()
             return {"action": "auth_result", "valid": ok, "lockout_seconds": lockout}
 
-        elif action == "toggle_focus_mode":
+        elif action == "toggle_focus_mode" or action == "set_mode":
             password = data.get("password", "")
-            target = data.get("target", "")  # "on" or "off"
-            # Turning ON doesn't require password; turning OFF does
-            if target == "off":
+            target = data.get("target", data.get("mode", ""))  # "off", "productive", or "study"
+
+            # Turning OFF Study Mode requires password
+            current_mode = db.get_setting("focus_mode", "off")
+            if target == "off" and current_mode == "study":
                 if not self.auth.verify_password(password):
-                    return {"action": "error", "message": "Wrong password", "lockout_seconds": self.auth.get_lockout_remaining()}
+                    return {"action": "error", "message": "Wrong password",
+                            "lockout_seconds": self.auth.get_lockout_remaining()}
+            # Productive mode OFF needs no password
+            # Turning ON study mode needs no password (it's restrictive)
+
             db.set_setting("focus_mode", target)
-            # Toggle incognito based on focus mode
+
+            # Auto DNS/incognito management based on mode
             if self.dns_blocker:
-                if target == "on":
+                if target == "study":
+                    # Full lockdown: safe DNS + block incognito
+                    self.dns_blocker.enable_safe_mode()
                     self.dns_blocker.block_incognito()
-                else:
+                    db.set_setting("dns_blocking", "on")
+                elif target == "productive":
+                    # Productive: safe DNS on, but incognito still allowed
+                    self.dns_blocker.enable_safe_mode()
                     self.dns_blocker.unblock_incognito()
+                    db.set_setting("dns_blocking", "on")
+                elif target == "off":
+                    # Fully off: restore DNS + unblock incognito
+                    self.dns_blocker.disable_safe_mode()
+                    self.dns_blocker.unblock_incognito()
+                    db.set_setting("dns_blocking", "off")
+
             return {"action": "focus_mode_changed", "mode": target}
 
         elif action == "disable_engine":
@@ -329,7 +429,12 @@ class APIServer:
             tokens = db.get_token_balance()
             top = db.get_top_apps(date)
             streak = db.get_streak()
-            total_sec = sum(categories.values())
+            
+            # Use strict global active time to prevent split-screen overlap inflation
+            global_active = categories.get("system", 0)
+            app_sum = sum(v for k, v in categories.items() if k != "system")
+            total_sec = global_active if global_active > 0 else app_sum
+            
             return {
                 "action": "stats",
                 "period": "day",
@@ -458,8 +563,37 @@ def start_api_server(auth: AuthManager, app_killer=None, tracker=None, dns_block
         except Exception as e:
             print(f"  [!] Broadcast error: {e}")
 
-    # Hook the tracker's on_flush callback
+    # Hook the tracker's callbacks
     if tracker:
         tracker.on_flush = on_tracker_flush
+        tracker.on_spotify_change = _make_spotify_pusher(api)
 
     return api
+
+
+def _make_spotify_pusher(api_server):
+    """Return a thread-safe function that pushes Spotify updates via WebSocket."""
+    def on_spotify_change():
+        if not api_server._event_loop or not api_server._clients:
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(
+                _push_spotify_update(api_server), api_server._event_loop
+            )
+        except Exception:
+            pass
+    return on_spotify_change
+
+
+async def _push_spotify_update(api_server):
+    """Push a fresh Spotify state to all connected dashboard clients."""
+    try:
+        today = datetime.date.today().isoformat()
+        spotify_time = db.get_spotify_screen_time(today)
+        await api_server.broadcast({
+            "action": "spotify",
+            "history": api_server.tracker.get_spotify_history() if api_server.tracker else [],
+            "listening_seconds": spotify_time,
+        })
+    except Exception as e:
+        print(f"  [!] Spotify push error: {e}")

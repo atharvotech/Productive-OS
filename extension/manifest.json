@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Focus Engine Pro",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Track browsing time, block distractions, and stay focused. Works with Focus Engine Pro desktop app.",
   "permissions": [
     "tabs",
     "activeTab",
     "webNavigation",
     "storage",
-    "alarms"
+    "alarms",
+    "notifications",
+    "scripting"
   ],
   "host_permissions": [
     "<all_urls>"

@@ -121,11 +121,13 @@ function handleMessage(data) {
             renderTokens(data);
             break;
         case "focus_mode":
-            updateFocusMode(data);
+            updateMode(data);
             break;
         case "focus_mode_changed":
-            updateFocusMode(data);
-            showToast(`Focus Mode ${data.mode === "on" ? "enabled 🎯" : "disabled"}`, "success");
+            updateMode(data);
+            if (data.mode === "study") showToast("📖 Study Mode activated — full lockdown", "success");
+            else if (data.mode === "productive") showToast("⚡ Productive Mode activated — soft blocks", "success");
+            else showToast("🔓 All restrictions lifted", "success");
             break;
         case "current_activity":
             renderLiveActivity(data);
@@ -404,7 +406,7 @@ function renderCategoryDonut(categories) {
     const emptyState = document.getElementById("category-chart-empty");
     if (!ctx) return;
 
-    const filtered = Object.entries(categories).filter(([_, v]) => v > 0);
+    const filtered = Object.entries(categories).filter(([k, v]) => v > 0 && k !== "system");
 
     if (filtered.length === 0) {
         if (emptyState) emptyState.classList.remove("hidden");
@@ -510,15 +512,49 @@ function renderTopApps(apps) {
     if (tableContainer && apps.length > 0) {
         let html = `<table class="data-table">
             <thead><tr><th>App</th><th>Category</th><th>Time</th></tr></thead><tbody>`;
-        apps.forEach(a => {
+        
+        apps.forEach((a, idx) => {
+            const hasSub = a.sub_items && a.sub_items.length > 0;
+            const chevron = hasSub ? `<span class="chevron" onclick="toggleSubRows('sub-${idx}')" style="cursor:pointer; font-weight:bold; color:var(--text-muted); margin-right:8px;">[+]</span>` : `<span style="display:inline-block; width:22px;"></span>`;
+            
             html += `<tr>
-                <td>${a.app_name}</td>
+                <td style="display:flex; align-items:center;">${chevron} ${a.app_name}</td>
                 <td><span class="activity-category ${a.category}">${a.category}</span></td>
                 <td>${formatTime(a.total_sec)}</td>
             </tr>`;
+            
+            if (hasSub) {
+                html += `<tr id="sub-${idx}" style="display:none; background: rgba(0,0,0,0.15);">
+                    <td colspan="3" style="padding: 0;">
+                        <table style="width:100%; border-collapse:collapse; background:transparent;">
+                            <tbody>`;
+                
+                a.sub_items.sort((x, y) => y.total_sec - x.total_sec).forEach(sub => {
+                    html += `<tr>
+                        <td style="padding: 8px 16px 8px 38px; color:var(--text-muted);">- ${sub.app_name}</td>
+                        <td style="padding: 8px 16px;"><span class="activity-category ${sub.category}" style="transform:scale(0.85); transform-origin:left;">${sub.category}</span></td>
+                        <td style="padding: 8px 16px; color:var(--text-muted);">${formatTime(sub.total_sec)}</td>
+                    </tr>`;
+                });
+                
+                html += `       </tbody>
+                        </table>
+                    </td>
+                </tr>`;
+            }
         });
         html += `</tbody></table>`;
         tableContainer.innerHTML = html;
+        
+        // Add toggle function if missing
+        if (!window.toggleSubRows) {
+            window.toggleSubRows = function(id) {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.style.display = el.style.display === "none" ? "table-row" : "none";
+                }
+            };
+        }
     }
 }
 
@@ -726,39 +762,58 @@ function renderLiveActivity(data) {
     const container = document.getElementById("live-activity");
     if (!container) return;
 
-    // Deduplicate consecutive same-app entries
-    const lastItem = activityHistory[0];
-    if (lastItem && lastItem.app === data.app && lastItem.title === (data.title || "").substring(0, 80)) {
-        return; // Same as last, skip
+    const currentApp = data.app || "Unknown";
+    const currentTitle = (data.title || "").substring(0, 80);
+    const currentCategory = data.category || "other";
+    const now = Date.now();
+
+    // Check if the same app+title is already at the top
+    const topItem = activityHistory[0];
+    if (topItem && topItem.app === currentApp && topItem.title === currentTitle) {
+        // Same activity — just update the running duration (don't add a new entry)
+        topItem.durationSec = Math.round((now - topItem.startedAt) / 1000);
+        topItem.category = currentCategory;  // category might change
+    } else {
+        // Different activity — push the new one to top
+        activityHistory.unshift({
+            app: currentApp,
+            title: currentTitle,
+            category: currentCategory,
+            startedAt: now,
+            durationSec: 0,
+            isNew: true,  // flag for slide-in animation
+        });
+
+        // Cap at 20 items
+        if (activityHistory.length > 20) activityHistory.pop();
     }
 
-    activityHistory.unshift({
-        app: data.app || "Unknown",
-        title: (data.title || "").substring(0, 80),
-        category: data.category || "other",
-        time: new Date().toLocaleTimeString(),
-    });
+    // Render
+    container.innerHTML = activityHistory.map((a, idx) => {
+        const duration = a.durationSec || Math.round((now - a.startedAt) / 1000);
+        const durationStr = duration < 60 ? `${duration}s` : `${Math.floor(duration / 60)}m ${duration % 60}s`;
+        const animClass = a.isNew && idx === 0 ? "activity-slide-in" : "";
 
-    if (activityHistory.length > 20) activityHistory.pop();
-
-    container.innerHTML = activityHistory.map(a => `
-        <div class="activity-item">
+        return `
+        <div class="activity-item ${animClass}">
             <div class="activity-details">
                 <span class="activity-app">${a.app}</span>
                 <span class="activity-title">${a.title ? " — " + a.title : ""}</span>
             </div>
             <div class="activity-meta">
-                <span class="activity-time">${a.time}</span>
+                <span class="activity-duration">${durationStr}</span>
                 <span class="activity-category ${a.category}">${a.category}</span>
             </div>
         </div>
-    `).join("");
+    `}).join("");
+
+    // Clear the "isNew" flag after first render so animation only plays once
+    if (activityHistory[0]) activityHistory[0].isNew = false;
 
     // Update Spotify "Now Playing" if applicable
     if (data.spotify && data.spotify.playing) {
         const el = document.getElementById("stat-now-playing");
         if (el) el.textContent = `${data.spotify.track} — ${data.spotify.artist}`;
-        // Show equalizer animation
         const eq = document.getElementById("equalizer-anim");
         if (eq) eq.classList.add("playing");
     } else {
@@ -897,27 +952,15 @@ function renderTokenChart(history) {
     }
 }
 
-// ─── Focus Mode ──────────────────────────────────────────────────────────
+// ─── Engine Mode ─────────────────────────────────────────────────────────
 
-function updateFocusMode(data) {
+function updateMode(data) {
     const mode = data.mode || "off";
-    const toggleBtns = document.querySelectorAll("#focus-mode-toggle .toggle-btn");
+    // Update settings page toggle
+    const toggleBtns = document.querySelectorAll("#mode-toggle .toggle-btn");
     toggleBtns.forEach(btn => {
         btn.classList.toggle("active", btn.dataset.value === mode);
     });
-
-    // Update focus mode pill in topbar
-    const pill = document.getElementById("focus-mode-pill");
-    const pillText = pill ? pill.querySelector(".fmp-text") : null;
-    if (pill && pillText) {
-        if (mode === "on") {
-            pill.classList.add("active");
-            pillText.textContent = "Focus ON";
-        } else {
-            pill.classList.remove("active");
-            pillText.textContent = "Focus OFF";
-        }
-    }
 
     const banner = document.getElementById("gaming-warning-banner");
     const warningText = document.getElementById("gaming-warning-text");
@@ -927,6 +970,13 @@ function updateFocusMode(data) {
     } else {
         banner.classList.add("hidden");
     }
+
+    // Show mode info toast on change
+    if (mode === "study") {
+        showToast("📖 Study Mode — Full distraction blocking active", "info");
+    } else if (mode === "productive") {
+        showToast("⚡ Productive Mode — Soft blocks + time reminders", "info");
+    }
 }
 
 // ─── Settings ────────────────────────────────────────────────────────────
@@ -935,7 +985,7 @@ function loadSettings(settings) {
     if (!settings) return;
 
     const focusMode = settings.focus_mode || "off";
-    document.querySelectorAll("#focus-mode-toggle .toggle-btn").forEach(btn => {
+    document.querySelectorAll("#mode-toggle .toggle-btn").forEach(btn => {
         btn.classList.toggle("active", btn.dataset.value === focusMode);
     });
 
@@ -946,6 +996,9 @@ function loadSettings(settings) {
 
     const threshold = document.getElementById("auto-focus-threshold");
     if (threshold) threshold.value = settings.auto_focus_threshold_min || "30";
+
+    const productiveTimers = document.getElementById("productive-timers");
+    if (productiveTimers) productiveTimers.value = settings.productive_mode_timers || "reddit.com:10,youtube.com:15";
 
     const earnRate = document.getElementById("token-earn-rate");
     if (earnRate) earnRate.value = settings.token_earn_rate || "30";
@@ -1051,11 +1104,6 @@ function navigateTo(page) {
         p.classList.toggle("active", p.id === `page-${page}`);
     });
 
-    // Update topbar breadcrumb
-    const labels = {overview:"Overview", screentime:"Screen Time", webactivity:"Web Activity", spotify:"Spotify & Audio", tokens:"Study Tokens", settings:"Settings"};
-    const bc = document.getElementById("page-breadcrumb");
-    if (bc) bc.textContent = labels[page] || page;
-
     // Refresh page-specific data on navigation
     const today = new Date().toISOString().split("T")[0];
     if (page === "screentime") {
@@ -1115,22 +1163,30 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    // Focus mode toggle
-    document.querySelectorAll("#focus-mode-toggle .toggle-btn").forEach(btn => {
+    // Mode toggle (OFF / PRODUCTIVE / STUDY)
+    document.querySelectorAll("#mode-toggle .toggle-btn").forEach(btn => {
         btn.addEventListener("click", () => {
             const target = btn.dataset.value;
-            if (target === "off") {
-                showPasswordModal("🔐 Disable Focus Mode",
-                    "Enter your admin password to turn off Focus Mode.",
+            const currentActive = document.querySelector("#mode-toggle .toggle-btn.active");
+            const currentMode = currentActive?.dataset.value || "off";
+
+            // If turning off from Study Mode → requires password
+            if (target === "off" && currentMode === "study") {
+                showPasswordModal("🔐 Disable Study Mode",
+                    "Study Mode requires password to disable. All restrictions will be lifted.",
                     (verified) => {
                         if (verified) {
-                            sendWS({ action: "toggle_focus_mode", target: "off", password: document.getElementById("modal-password").value });
+                            sendWS({ action: "set_mode", target: "off", password: document.getElementById("modal-password").value });
                             closeModal();
                         }
                     }
                 );
+            } else if (target === "off" && currentMode === "productive") {
+                // Productive mode off — no password needed
+                sendWS({ action: "set_mode", target: "off", password: "" });
             } else {
-                sendWS({ action: "toggle_focus_mode", target: "on", password: "" });
+                // Switching to productive or study — no password
+                sendWS({ action: "set_mode", target, password: "" });
             }
         });
     });
@@ -1194,12 +1250,13 @@ document.addEventListener("DOMContentLoaded", () => {
         );
     });
 
-    // Save token rates
+    // Save token rates & productive timers
     document.getElementById("btn-save-token-rates")?.addEventListener("click", () => {
         const earnRate = document.getElementById("token-earn-rate").value;
         const deductRate = document.getElementById("token-deduct-rate").value;
         const threshold = document.getElementById("auto-focus-threshold").value;
-        showPasswordModal("🔐 Admin Password", "Enter password to update token rates.",
+        const productiveTimers = document.getElementById("productive-timers")?.value || "";
+        showPasswordModal("🔐 Admin Password", "Enter password to update rates & timers.",
             (verified) => {
                 if (verified) {
                     sendWS({ action: "update_settings", password: document.getElementById("modal-password").value,
@@ -1207,6 +1264,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             token_earn_rate: earnRate,
                             token_deduct_rate: deductRate,
                             auto_focus_threshold_min: threshold,
+                            productive_mode_timers: productiveTimers,
                         }
                     });
                     closeModal();
@@ -1315,6 +1373,94 @@ document.addEventListener("DOMContentLoaded", () => {
     // Enter key in modal
     document.getElementById("modal-password")?.addEventListener("keydown", (e) => {
         if (e.key === "Enter") document.getElementById("modal-confirm")?.click();
+    });
+
+    // ── YouTube Channel Search ──────────────────────────────────────────
+    document.getElementById("btn-yt-search")?.addEventListener("click", async () => {
+        const query = document.getElementById("yt-search-input")?.value?.trim();
+        if (!query) return;
+        
+        const resultsContainer = document.getElementById("yt-search-results");
+        resultsContainer.innerHTML = `<div class="yt-search-loading">Searching YouTube</div>`;
+        
+        try {
+            // Use local Python backend first, then fallback to Invidious if it fails
+            const instances = [
+                "",
+                "https://vid.puffyan.us",
+                "https://inv.nadeko.net",
+                "https://invidious.snopyta.org",
+            ];
+            
+            let data = null;
+            for (const instance of instances) {
+                try {
+                    const resp = await fetch(`${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=channel&sort_by=relevance`, {
+                        signal: AbortSignal.timeout(5000),
+                    });
+                    if (resp.ok) {
+                        data = await resp.json();
+                        break;
+                    }
+                } catch {
+                    continue;
+                }
+            }
+            
+            if (!data || data.length === 0) {
+                resultsContainer.innerHTML = `<p class="empty-text">No channels found. Try a different search term, or type the channel name manually in the textarea above.</p>`;
+                return;
+            }
+            
+            // Get current whitelisted channels for "already added" check
+            const currentChannels = (document.getElementById("whitelisted-channels")?.value || "")
+                .split("\n").map(c => c.trim().toLowerCase()).filter(Boolean);
+            
+            resultsContainer.innerHTML = data.slice(0, 8).map(ch => {
+                const name = ch.author || ch.name || "Unknown Channel";
+                const desc = ch.description?.substring(0, 100) || `${(ch.subCount || 0).toLocaleString()} subscribers`;
+                const thumb = ch.authorThumbnails?.[0]?.url || "";
+                const thumbSrc = thumb.startsWith("//") ? "https:" + thumb : thumb;
+                const isAdded = currentChannels.includes(name.toLowerCase());
+                
+                return `
+                <div class="yt-result-card">
+                    <img class="yt-result-thumb" src="${thumbSrc}" alt="" onerror="this.style.display='none'">
+                    <div class="yt-result-info">
+                        <div class="yt-result-name">${name}</div>
+                        <div class="yt-result-desc">${desc}</div>
+                    </div>
+                    <button class="btn btn-primary yt-result-btn ${isAdded ? 'added' : ''}" 
+                            data-channel="${name.replace(/"/g, '&quot;')}"
+                            ${isAdded ? 'disabled' : ''}>
+                        ${isAdded ? '✓ Added' : '+ Add'}
+                    </button>
+                </div>`;
+            }).join("");
+            
+            // Attach click handlers to Add buttons
+            resultsContainer.querySelectorAll(".yt-result-btn:not(.added)").forEach(btn => {
+                btn.addEventListener("click", () => {
+                    const channelName = btn.dataset.channel;
+                    const textarea = document.getElementById("whitelisted-channels");
+                    const current = textarea.value.trim();
+                    textarea.value = current ? current + "\n" + channelName : channelName;
+                    btn.textContent = "✓ Added";
+                    btn.classList.add("added");
+                    btn.disabled = true;
+                    showToast(`Added "${channelName}" to whitelist`, "success");
+                });
+            });
+            
+        } catch (err) {
+            resultsContainer.innerHTML = `<p class="empty-text">Search failed. You can type channel names manually in the textarea above.</p>`;
+            console.error("YT search error:", err);
+        }
+    });
+    
+    // Enter key in YT search
+    document.getElementById("yt-search-input")?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") document.getElementById("btn-yt-search")?.click();
     });
 
     // Connect WebSocket

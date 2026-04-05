@@ -74,13 +74,16 @@ def main():
     # Step 5: DNS Blocker
     from core.dns_blocker import DNSBlocker
     dns = DNSBlocker()
-    dns_setting = db.get_setting("dns_blocking", "on")
-    if dns_setting == "on":
+    current_mode = db.get_setting("focus_mode", "off")  # off | productive | study
+    if current_mode == "study":
         dns.enable_safe_mode()
-    # If focus mode was left ON, re-apply incognito block
-    if db.get_setting("focus_mode", "off") == "on":
         dns.block_incognito()
-    print("[+] DNS Blocker armed")
+        print("[+] Study Mode active — DNS + incognito locked down")
+    elif db.get_setting("dns_blocking", "on") == "on":
+        dns.enable_safe_mode()
+        print("[+] DNS Blocker armed")
+    else:
+        print("[+] DNS Blocker standby (mode: off)")
 
     # Step 6: App Killer
     from core.app_killer import AppKiller

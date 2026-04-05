@@ -1,63 +1,97 @@
 """
-Focus Engine Pro — DNS Blocker & Incognito Registry Toggle
-Sets Cloudflare Family DNS (1.1.1.3) to block adult content system-wide.
-Toggles Chrome/Edge incognito mode via Windows Registry when focus mode changes.
-Requires Administrator privileges.
+Focus Engine Pro — DNS Blocker & Incognito Guard
+Manages Windows DNS settings to block adult/distraction content,
+and uses the Registry to disable incognito mode in Chromium browsers.
+Requires Administrator privileges to operate.
 """
 
 import subprocess
 import winreg
-import ctypes
-import os
+
+
+# ── Safe, family-safe public DNS servers ──────────────────────────────────
+# Cloudflare Family (1.1.1.3 / 1.0.0.3) — blocks malware + adult content
+SAFE_DNS_PRIMARY   = "1.1.1.3"
+SAFE_DNS_SECONDARY = "1.0.0.3"
+
+# Google public DNS — used as the restore target (neutral)
+DEFAULT_DNS_PRIMARY   = "8.8.8.8"
+DEFAULT_DNS_SECONDARY = "8.8.4.4"
+
+
+# ── Registry paths for incognito blocking ────────────────────────────────
+_INCOGNITO_POLICIES = {
+    "chrome": (
+        r"SOFTWARE\Policies\Google\Chrome",
+        "IncognitoModeAvailability",
+    ),
+    "brave": (
+        r"SOFTWARE\Policies\BraveSoftware\Brave",
+        "IncognitoModeAvailability",
+    ),
+    "msedge": (
+        r"SOFTWARE\Policies\Microsoft\Edge",
+        "InPrivateModeAvailability",
+    ),
+}
+
+# Value 1 = incognito/InPrivate disabled
+_INCOGNITO_BLOCK_VALUE = 1
 
 
 class DNSBlocker:
-    """Manages DNS settings and browser incognito registry keys."""
-
-    SAFE_DNS_PRIMARY = "1.1.1.3"
-    SAFE_DNS_SECONDARY = "1.0.0.3"
+    """Manages DNS settings and browser incognito blocking."""
 
     def __init__(self):
-        self._original_dns = {}  # adapter_name -> original DNS
-        self._is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+        self._enabled = False
 
-    # ── DNS Management ────────────────────────────────────────────────────
+    # ── Public state ──────────────────────────────────────────────────────
+
+    def is_enabled(self) -> bool:
+        """Return True if safe DNS is currently active."""
+        return self._enabled
+
+    # ── DNS management ────────────────────────────────────────────────────
 
     def enable_safe_mode(self):
-        """Set DNS to Cloudflare Family on all active network adapters."""
-        if not self._is_admin:
-            print("[!] DNS Blocker requires admin privileges. Skipping.")
-            return False
+        """
+        Set all active network adapters to Cloudflare Family DNS.
+        Blocks adult content and malware at the DNS level across all browsers.
+        """
+        adapters = self._get_network_adapters()
+        if not adapters:
+            print("  [!] DNS Blocker: No active network adapters found.")
+            return
 
-        adapters = self._get_active_adapters()
+        success = False
         for adapter in adapters:
             try:
                 # Set primary DNS
                 subprocess.run(
                     ["netsh", "interface", "ip", "set", "dns",
-                     f"name={adapter}", "static", self.SAFE_DNS_PRIMARY],
+                     f"name={adapter}", "static", SAFE_DNS_PRIMARY],
                     capture_output=True, check=True
                 )
                 # Set secondary DNS
                 subprocess.run(
                     ["netsh", "interface", "ip", "add", "dns",
-                     f"name={adapter}", self.SAFE_DNS_SECONDARY, "index=2"],
+                     f"name={adapter}", SAFE_DNS_SECONDARY, "index=2"],
                     capture_output=True, check=True
                 )
-                print(f"  [+] DNS set to Cloudflare Family on: {adapter}")
+                success = True
+                print(f"  [+] DNS Blocker: Safe DNS set on adapter '{adapter}'")
             except subprocess.CalledProcessError as e:
-                print(f"  [!] Failed to set DNS on {adapter}: {e}")
+                print(f"  [!] DNS Blocker: Failed to set DNS on '{adapter}': {e}")
 
-        # Flush DNS cache
-        subprocess.run(["ipconfig", "/flushdns"], capture_output=True)
-        return True
+        if success:
+            self._enabled = True
 
     def disable_safe_mode(self):
-        """Restore DNS to automatic (DHCP) on all adapters."""
-        if not self._is_admin:
-            return False
-
-        adapters = self._get_active_adapters()
+        """
+        Restore network adapters to automatic (DHCP) DNS.
+        Removes the safe DNS restriction.
+        """
+        adapters = self._get_network_adapters()
         for adapter in adapters:
             try:
                 subprocess.run(
@@ -65,104 +99,102 @@ class DNSBlocker:
                      f"name={adapter}", "dhcp"],
                     capture_output=True, check=True
                 )
-                print(f"  [+] DNS restored to DHCP on: {adapter}")
-            except subprocess.CalledProcessError:
-                pass
+                print(f"  [+] DNS Blocker: DNS restored to DHCP on '{adapter}'")
+            except subprocess.CalledProcessError as e:
+                print(f"  [!] DNS Blocker: Failed to restore DNS on '{adapter}': {e}")
 
-        subprocess.run(["ipconfig", "/flushdns"], capture_output=True)
-        return True
+        self._enabled = False
 
-    def is_enabled(self) -> bool:
-        """Check if any adapter has our safe DNS."""
-        try:
-            result = subprocess.run(
-                ["netsh", "interface", "ip", "show", "dns"],
-                capture_output=True, text=True
+    # ── Incognito blocking ────────────────────────────────────────────────
+
+    def block_incognito(self):
+        """
+        Write Registry policies to disable incognito/InPrivate in Chrome,
+        Brave, and Edge. Requires write access to HKEY_LOCAL_MACHINE.
+        """
+        for browser, (key_path, value_name) in _INCOGNITO_POLICIES.items():
+            self._write_registry_dword(
+                winreg.HKEY_LOCAL_MACHINE, key_path,
+                value_name, _INCOGNITO_BLOCK_VALUE
             )
-            return self.SAFE_DNS_PRIMARY in result.stdout
-        except Exception:
-            return False
+            print(f"  [+] Incognito blocked: {browser}")
 
-    def _get_active_adapters(self) -> list:
-        """Get names of active network adapters."""
+    def unblock_incognito(self):
+        """
+        Remove Registry policies that disable incognito mode.
+        Restores the ability to use private/incognito browsing.
+        """
+        for browser, (key_path, value_name) in _INCOGNITO_POLICIES.items():
+            self._delete_registry_value(
+                winreg.HKEY_LOCAL_MACHINE, key_path, value_name
+            )
+            print(f"  [+] Incognito unblocked: {browser}")
+
+    # ── Helpers: Registry ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _write_registry_dword(hive, key_path: str, value_name: str, value: int):
+        """Create a DWORD registry value, creating parent keys as needed."""
+        try:
+            key = winreg.CreateKeyEx(
+                hive, key_path, 0,
+                winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY
+            )
+            winreg.SetValueEx(key, value_name, 0, winreg.REG_DWORD, value)
+            winreg.CloseKey(key)
+        except Exception as e:
+            print(f"  [!] Registry write failed ({key_path}\\{value_name}): {e}")
+
+    @staticmethod
+    def _delete_registry_value(hive, key_path: str, value_name: str):
+        """Delete a registry value. Silently ignores if it doesn't exist."""
+        try:
+            key = winreg.OpenKey(
+                hive, key_path, 0,
+                winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY
+            )
+            winreg.DeleteValue(key, value_name)
+            winreg.CloseKey(key)
+        except FileNotFoundError:
+            pass  # Key or value doesn't exist — fine
+        except Exception as e:
+            print(f"  [!] Registry delete failed ({key_path}\\{value_name}): {e}")
+
+    # ── Helpers: Network adapters ─────────────────────────────────────────
+
+    @staticmethod
+    def _get_network_adapters() -> list:
+        """
+        Return a list of active network adapter names by parsing
+        'netsh interface show interface'.
+        Only includes adapters that are 'Connected'.
+        """
+        adapters = []
         try:
             result = subprocess.run(
                 ["netsh", "interface", "show", "interface"],
                 capture_output=True, text=True
             )
-            adapters = []
-            for line in result.stdout.strip().split("\n")[3:]:
-                parts = line.split()
-                if len(parts) >= 4 and parts[0].lower() in ("enabled",):
-                    # "Enabled" adapters — name is everything after the 3rd column
-                    if parts[1].lower() == "connected":
-                        name = " ".join(parts[3:])
-                        adapters.append(name)
-            return adapters if adapters else ["Wi-Fi", "Ethernet"]
-        except Exception:
-            return ["Wi-Fi", "Ethernet"]
-
-    # ── Incognito Mode Registry Toggle ────────────────────────────────────
-
-    def block_incognito(self):
-        """Disable incognito/private mode in Chrome and Edge via registry."""
-        if not self._is_admin:
-            print("[!] Need admin to modify registry. Skipping incognito block.")
-            return False
-
-        # Chrome
-        self._set_registry_value(
-            r"SOFTWARE\Policies\Google\Chrome",
-            "IncognitoModeAvailability", 1
-        )
-        # Edge
-        self._set_registry_value(
-            r"SOFTWARE\Policies\Microsoft\Edge",
-            "InPrivateModeAvailability", 1
-        )
-        print("  [+] Incognito / InPrivate mode BLOCKED via registry")
-        return True
-
-    def unblock_incognito(self):
-        """Re-enable incognito/private mode."""
-        if not self._is_admin:
-            return False
-
-        # Chrome
-        self._delete_registry_value(
-            r"SOFTWARE\Policies\Google\Chrome",
-            "IncognitoModeAvailability"
-        )
-        # Edge
-        self._delete_registry_value(
-            r"SOFTWARE\Policies\Microsoft\Edge",
-            "InPrivateModeAvailability"
-        )
-        print("  [+] Incognito / InPrivate mode RESTORED")
-        return True
-
-    def _set_registry_value(self, key_path: str, value_name: str, value: int):
-        try:
-            key = winreg.CreateKeyEx(
-                winreg.HKEY_LOCAL_MACHINE, key_path,
-                0, winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY
-            )
-            winreg.SetValueEx(key, value_name, 0, winreg.REG_DWORD, value)
-            winreg.CloseKey(key)
-        except PermissionError:
-            print(f"  [!] Cannot write registry: {key_path}\\{value_name}")
+            for line in result.stdout.splitlines():
+                # Output columns: Admin State | State | Type | Interface Name
+                parts = line.strip().split()
+                if len(parts) >= 4 and "Connected" in line:
+                    # Interface name is everything after the 3rd column
+                    # (handles multi-word names like "Wi-Fi 2")
+                    name = line.strip()
+                    # Find the "Connected" keyword and take everything after it
+                    idx = name.find("Connected")
+                    if idx != -1:
+                        # Skip the word "Connected" and any trailing columns (Dedicated, etc.)
+                        remainder = name[idx + len("Connected"):].strip()
+                        # The last token after type field is the name
+                        # More robust: split the original line into 4 parts max
+                        cols = line.strip().split(None, 3)
+                        if len(cols) >= 4:
+                            adapter_name = cols[3].strip()
+                            if adapter_name:
+                                adapters.append(adapter_name)
         except Exception as e:
-            print(f"  [!] Registry error: {e}")
+            print(f"  [!] DNS Blocker: Could not enumerate adapters: {e}")
 
-    def _delete_registry_value(self, key_path: str, value_name: str):
-        try:
-            key = winreg.OpenKeyEx(
-                winreg.HKEY_LOCAL_MACHINE, key_path,
-                0, winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY
-            )
-            winreg.DeleteValue(key, value_name)
-            winreg.CloseKey(key)
-        except FileNotFoundError:
-            pass  # Key doesn't exist, that's fine
-        except Exception:
-            pass
+        return adapters
