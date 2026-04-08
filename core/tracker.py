@@ -453,6 +453,9 @@ class ActivityTracker:
         self._running = True
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
+        # WinEvent hook thread for instant Study Mode window enforcement
+        self._enforcer_thread = threading.Thread(target=self._study_enforcer_loop, daemon=True)
+        self._enforcer_thread.start()
 
     def _load_spotify_history(self):
         """Load today's Spotify tracks from DB so history persists across restarts."""
@@ -489,42 +492,237 @@ class ActivityTracker:
         self._study_accumulator = 0
         self._gaming_accumulator = 0
         self.on_spotify_change = None
+        
+        # Window manipulation tracking
+        self._locked_hwnd = None
+        self._locked_style = None
+        self._style_applied = False
+        self._snap_locked = False
+        self._enforcer_thread = None
 
-    def _on_mode_changed(self, old_mode, new_mode):
-        """Called when focus_mode changes. Handles Registry settings and broadcasts immediately."""
+
+    # ── Registry Snap Lock ────────────────────────────────────────────────
+    def _apply_snap_lock(self, enable: bool):
+        """Enable or disable Windows Snap Assist via Registry + live broadcast."""
         try:
             import winreg
-            import ctypes
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Desktop", 0, winreg.KEY_SET_VALUE)
-            
+
+            val_str = "0" if enable else "1"
+            val_int = 0 if enable else 1
+
+            # Key 1: Main snap zone toggle
+            k1 = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Control Panel\Desktop", 0, winreg.KEY_SET_VALUE)
+            winreg.SetValueEx(k1, "WindowArrangementActive", 0, winreg.REG_SZ, val_str)
+            winreg.CloseKey(k1)
+
+            # Key 2: SnapAssist suggestions after first snap
+            k2 = winreg.CreateKey(winreg.HKEY_CURRENT_USER,
+                                  r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced")
+            winreg.SetValueEx(k2, "SnapAssist", 0, winreg.REG_DWORD, val_int)
+            # Key 3: Windows 11 layout picker on maximize hover
+            winreg.SetValueEx(k2, "EnableSnapBar", 0, winreg.REG_DWORD, val_int)
+            winreg.CloseKey(k2)
+
+            # Instantly apply via SystemParametersInfo (no reboot needed)
             SPI_SETSNAPSIZING = 0x008F
             SPI_SETDOCKMOVING = 0x0091
-            SPIF_UPDATEINIFILE = 0x01
-            SPIF_SENDWININICHANGE = 0x02
-            SPIF_FLAGS = SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE
-            
-            disable = (new_mode == "study")
-            val = "0" if disable else "1"
-            winreg.SetValueEx(key, "WindowArrangementActive", 0, winreg.REG_SZ, val)
-            winreg.CloseKey(key)
+            SPIF_FLAGS = 0x01 | 0x02  # SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE
+            ctypes.windll.user32.SystemParametersInfoW(SPI_SETSNAPSIZING, val_int, 0, SPIF_FLAGS)
+            ctypes.windll.user32.SystemParametersInfoW(SPI_SETDOCKMOVING,  val_int, 0, SPIF_FLAGS)
 
-            # Apply instantly using SystemParametersInfo
-            param_val = 0 if disable else 1
-            ctypes.windll.user32.SystemParametersInfoW(SPI_SETSNAPSIZING, param_val, 0, SPIF_FLAGS)
-            ctypes.windll.user32.SystemParametersInfoW(SPI_SETDOCKMOVING, param_val, 0, SPIF_FLAGS)
-            
-            # Broadcast registry change to Explorer for hotkey suspension
+            # Broadcast WM_SETTINGCHANGE so Explorer picks up changes immediately
             HWND_BROADCAST = 0xFFFF
             WM_SETTINGCHANGE = 0x001A
-            SMTO_ABORTIFHUNG = 0x0002
             res = ctypes.c_ulong()
-            ctypes.windll.user32.SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, "WindowArrangementActive", SMTO_ABORTIFHUNG, 5000, ctypes.byref(res))
-            print(f"[*] Snap Assist {'Disabled' if disable else 'Enabled'} globally.")
+            ctypes.windll.user32.SendMessageTimeoutW(
+                HWND_BROADCAST, WM_SETTINGCHANGE, 0,
+                "WindowArrangementActive", 0x0002, 5000, ctypes.byref(res))
+
+            self._snap_locked = enable
+            print(f"[*] Snap Assist {'LOCKED' if enable else 'RESTORED'}")
         except Exception as e:
-            print(f"[!] Registry error toggling snap assist: {e}")
+            print(f"[!] Snap lock error: {e}")
+
+    # ── Per-Window Enforce ───────────────────────────────────────────────<br/>
+    def _enforce_study_window(self, hwnd: int):
+        """Force a window to be maximized and strip its resize/min/max buttons.
+        
+        Skips style stripping on UWP/modern apps (ApplicationFrameHost children)
+        since they render their own chrome and ignore WS_MINIMIZEBOX.
+        Calls SetWindowLongW/SetWindowPos only ONCE per hwnd.
+        """
+        if not hwnd:
+            return
+        try:
+            u32 = ctypes.windll.user32
+
+            # Step 1: Force maximize ONLY if currently not maximized.
+            if not bool(u32.IsZoomed(hwnd)):
+                u32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE
+
+            # Step 2: Strip title bar buttons — only on new window, skip UWP
+            if hwnd != self._locked_hwnd:
+                self._restore_window()
+
+                # Detect UWP: parent class is "ApplicationFrameWindow"
+                buf = ctypes.create_unicode_buffer(64)
+                ctypes.windll.user32.GetClassNameW(hwnd, buf, 64)
+                is_uwp = buf.value in ("ApplicationFrameWindow", "Windows.UI.Core.CoreWindow")
+
+                style = u32.GetWindowLongW(hwnd, -16)  # GWL_STYLE
+                if style:
+                    self._locked_hwnd = hwnd
+                    self._locked_style = style
+                    self._style_applied = False
+
+                    if not is_uwp:
+                        stripped = style & ~0x00020000 & ~0x00010000 & ~0x00040000
+                        if stripped != style:
+                            u32.SetWindowLongW(hwnd, -16, stripped)
+                            u32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)
+                            self._style_applied = True
+
+        except Exception as e:
+            print(f"[!] enforce_study_window error: {e}")
+
+    # ── Restore Everything ───────────────────────────────────────────────
+    def _restore_window(self):
+        """Restore the previously locked window's original style."""
+        if self._locked_hwnd and self._locked_style:
+            try:
+                u32 = ctypes.windll.user32
+                u32.SetWindowLongW(self._locked_hwnd, -16, self._locked_style)
+                u32.SetWindowPos(self._locked_hwnd, 0, 0, 0, 0, 0, 0x0027)
+            except Exception:
+                pass
+        self._locked_hwnd = None
+        self._locked_style = None
+
+    def _on_mode_changed(self, old_mode: str, new_mode: str):
+        """Called whenever focus_mode changes in the DB."""
+        if new_mode == "study":
+            self._apply_snap_lock(True)
+        elif old_mode == "study":
+            self._restore_window()
+            self._apply_snap_lock(False)
 
     def stop(self):
         self._running = False
+        self._restore_window()
+        if self._snap_locked:
+            self._apply_snap_lock(False)
+
+    # ── WinEvent-Driven Study Enforcer ───────────────────────────────────
+    def _study_enforcer_loop(self):
+        """WinEvent hook-based instant Study Mode enforcer."""
+        PROTECTED = {
+            "explorer.exe", "searchhost.exe", "searchapp.exe", "searchui.exe",
+            "startmenuexperiencehost.exe", "applicationframehost.exe",
+            "shellexperiencehost.exe", "systemsettings.exe",
+            "taskmgr.exe", "lockapp.exe", "winlogon.exe",
+            "textinputhost.exe",
+        }
+        SYSTEM_WINDOW_CLASSES = {
+            "Shell_TrayWnd", "NotifyIconOverflowWindow", "Windows.UI.Core.CoreWindow",
+            "ApplicationFrameWindow", "TopLevelWindowForOverflowXamlIsland",
+            "SearchPane", "Windows.UI.Search", "MultitaskingViewFrame",
+            "WinUIDesktopWin32WindowClass",
+        }
+        u32 = ctypes.windll.user32
+        SW_MAXIMIZE = 3
+
+        # Cache: hwnd -> bool (is_protected). Reset when mode changes.
+        _known_protected = set()
+        _known_safe = set()
+
+        def is_protected_hwnd(hwnd):
+            """Fast protected check with caching to avoid psutil in hot path."""
+            if hwnd in _known_protected:
+                return True
+            if hwnd in _known_safe:
+                return False
+            try:
+                # Check window class name first (no psutil needed, very fast)
+                buf = ctypes.create_unicode_buffer(64)
+                u32.GetClassNameW(hwnd, buf, 64)
+                if buf.value in SYSTEM_WINDOW_CLASSES:
+                    _known_protected.add(hwnd)
+                    return True
+
+                pid = ctypes.wintypes.DWORD()
+                GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                proc = psutil.Process(pid.value)
+                app = proc.name().lower()
+                if app in PROTECTED or app in SYSTEM_BACKGROUND_PROCESSES:
+                    _known_protected.add(hwnd)
+                    return True
+                _known_safe.add(hwnd)
+                return False
+            except Exception:
+                return True  # Treat unknown as protected (safe default)
+
+        def force_maximize(hwnd):
+            """Maximize a window. Try ShowWindow first, fall back to SetWindowPos."""
+            if not hwnd or not IsWindowVisible(hwnd):
+                return
+            if bool(u32.IsZoomed(hwnd)):
+                return  # Already maximized, nothing to do
+            if is_protected_hwnd(hwnd):
+                return
+            # Method 1: Standard ShowWindow
+            u32.ShowWindow(hwnd, SW_MAXIMIZE)
+
+        def win_event_callback(hook, event, hwnd, id_obj, id_child, thread, time_ms):
+            """Fires instantly on any matching window state change."""
+            if not self._running or self._current_mode != "study" or not hwnd:
+                return
+            try:
+                force_maximize(hwnd)
+
+                # On foreground change, sweep ALL visible non-maximized windows
+                # This catches "restore then quickly switch to another app"
+                if event == 0x0003:  # EVENT_SYSTEM_FOREGROUND
+                    for w in get_visible_windows():
+                        if not w["is_maximized"]:
+                            force_maximize(w["hwnd"])
+            except Exception:
+                pass
+
+        WinEventProcType = ctypes.WINFUNCTYPE(
+            None,
+            ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD, ctypes.wintypes.HWND,
+            ctypes.wintypes.LONG, ctypes.wintypes.LONG,
+            ctypes.wintypes.DWORD, ctypes.wintypes.DWORD,
+        )
+        callback_ptr = WinEventProcType(win_event_callback)
+
+        WINEVENT_OUTOFCONTEXT = 0x0000
+
+        # Separate hooks for each event type we care about:
+        hooks = []
+        for evt in [
+            0x0003,   # EVENT_SYSTEM_FOREGROUND — window activated
+            0x0016,   # EVENT_SYSTEM_MINIMIZESTART — minimize attempted
+            0x0017,   # EVENT_SYSTEM_MINIMIZEEND — minimize completed (restore)
+            0x000A,   # EVENT_SYSTEM_MOVESIZEEND — drag/resize finished
+        ]:
+            h = u32.SetWinEventHook(evt, evt, None, callback_ptr, 0, 0, WINEVENT_OUTOFCONTEXT)
+            if h:
+                hooks.append(h)
+
+        # Message pump — WinEvent hooks require a message loop on their thread
+        msg = ctypes.wintypes.MSG()
+        while self._running:
+            result = u32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1)  # PM_REMOVE
+            if result > 0:
+                u32.TranslateMessage(ctypes.byref(msg))
+                u32.DispatchMessageW(ctypes.byref(msg))
+            else:
+                time.sleep(0.01)
+
+        for h in hooks:
+            u32.UnhookWinEvent(h)
 
     def _run_loop(self):
         """Main tracking loop — runs every 2 seconds."""
@@ -561,8 +759,33 @@ class ActivityTracker:
                 fg_hwnd = info.get("hwnd", 0)
                 is_minimized = info.get("is_minimized", False)
 
-                # Study Mode: Only one app at a time - programmatic minimizing removed due to UWP app instability.
-                # (We will rely on registry snap assist disabling if requested).
+                # ── Study Mode: Enforce single maximized window ───────────────
+                if self._current_mode == "study" and fg_hwnd and not is_minimized:
+                    app_lower = info["app"].lower()
+                    protected = {
+                        "explorer.exe", "searchhost.exe", "searchapp.exe", "searchui.exe",
+                        "startmenuexperiencehost.exe", "applicationframehost.exe",
+                        "shellexperiencehost.exe", "systemsettings.exe",
+                        "taskmgr.exe", "lockapp.exe", "winlogon.exe",
+                        "textinputhost.exe",
+                    }
+                    # Also skip by window class (system overlays have well-known class names)
+                    buf = ctypes.create_unicode_buffer(64)
+                    ctypes.windll.user32.GetClassNameW(fg_hwnd, buf, 64)
+                    system_classes = {
+                        "Shell_TrayWnd", "NotifyIconOverflowWindow", "Windows.UI.Core.CoreWindow",
+                        "ApplicationFrameWindow", "TopLevelWindowForOverflowXamlIsland",
+                        "SearchPane", "Windows.UI.Search",
+                        "WinUIDesktopWin32WindowClass",
+                    }
+                    if app_lower not in protected and app_lower not in SYSTEM_BACKGROUND_PROCESSES \
+                            and buf.value not in system_classes:
+                        self._enforce_study_window(fg_hwnd)
+                elif self._current_mode != "study":
+                    # Mode turned off — restore the locked window once
+                    if self._locked_hwnd:
+                        self._restore_window()
+
 
                 # Get all visible windows to track concurrently
                 active_windows = get_visible_windows() if not is_minimized else [info]

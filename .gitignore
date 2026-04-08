@@ -16,6 +16,9 @@ core/data.db-wal
 # Security & Config 
 core/admin_config.json
 *.json.lock
+_temp_tracker.py
+_window_dump.json
+_window_dump.txt
 
 # Environments & Virtual Envs
 venv/
