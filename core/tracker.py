@@ -426,7 +426,8 @@ def parse_spotify_title(title: str) -> dict:
 class ActivityTracker:
     """Polls foreground window every 2 seconds, accumulates and flushes to DB."""
 
-    def __init__(self):
+    def __init__(self, app_killer=None):
+        self.app_killer = app_killer
         self._running = False
         self._thread = None
         self._accumulated = {}  # (app, category) -> {seconds, last_title}
@@ -445,6 +446,16 @@ class ActivityTracker:
         self.on_spotify_change = None  # Callback when Spotify track changes (immediate WS push)
         self._current_mode = db.get_setting("focus_mode", "off")
         self._recent_activities = []   # [{app, category, title, seconds, last_seen}] ordered by recency
+
+        # Study video token tracking (from extension media heartbeat)
+        self._study_video_seconds = 0  # Accumulates verified study watch time
+        self._study_video_token_awarded = 0  # Total seconds at which last token was awarded
+
+        # Window manipulation tracking
+        self._modified_windows = {}   # {hwnd: original_style} — ALL stripped windows
+        self._snap_locked = False
+        self._enforcer_thread = None
+        self._extensions_locked = False
 
     def start(self):
         """Start the tracker in a daemon thread."""
@@ -477,70 +488,98 @@ class ActivityTracker:
         except Exception:
             pass
 
-    def __init__(self, app_killer=None):
-        self.app_killer = app_killer
-        self._running = False
-        self._thread = None
-        self._accumulated = {}
-        self._recent_activities = []
-        self._last_flush = time.time()
-        self._current_mode = db.get_setting("focus_mode", "off")
-        self._spotify_log = []
-        self._last_spotify_track = ""
-        self._spotify_listen_seconds = 0
-        self._spotify_db_saved_seconds = 0
-        self._study_accumulator = 0
-        self._gaming_accumulator = 0
-        self.on_spotify_change = None
+    # ── Extension Page Lock (prevent disabling extension) ─────────────────
+    def _lock_extension_pages(self, lock: bool):
+        """Block or unblock chrome://extensions and edge://extensions via browser policy.
         
-        # Window manipulation tracking
-        self._locked_hwnd = None
-        self._locked_style = None
-        self._style_applied = False
-        self._snap_locked = False
-        self._enforcer_thread = None
+        Uses URLBlocklist registry policy to prevent students from accessing
+        the extensions management page and disabling the Focus Engine extension.
+        """
+        import winreg
+
+        # Policies for Chrome and Edge
+        policies = [
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Google\Chrome\URLBlocklist"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Edge\URLBlocklist"),
+        ]
+        blocked_urls = [
+            "chrome://extensions",
+            "chrome://extensions/*",
+            "edge://extensions",
+            "edge://extensions/*",
+        ]
+
+        try:
+            if lock:
+                for hive, path in policies:
+                    try:
+                        key = winreg.CreateKey(hive, path)
+                        for i, url in enumerate(blocked_urls):
+                            winreg.SetValueEx(key, str(i + 100), 0, winreg.REG_SZ, url)
+                        winreg.CloseKey(key)
+                    except PermissionError:
+                        print(f"[!] No permission to write policy: {path}")
+                self._extensions_locked = True
+                print("[*] Extension pages LOCKED (chrome://extensions blocked)")
+            else:
+                for hive, path in policies:
+                    try:
+                        key = winreg.OpenKey(hive, path, 0,
+                                            winreg.KEY_SET_VALUE | winreg.KEY_READ)
+                        # Remove only our entries (keys 100-103)
+                        for i in range(100, 104):
+                            try:
+                                winreg.DeleteValue(key, str(i))
+                            except FileNotFoundError:
+                                pass
+                        winreg.CloseKey(key)
+                    except (FileNotFoundError, PermissionError):
+                        pass
+                self._extensions_locked = False
+                print("[*] Extension pages UNLOCKED")
+        except Exception as e:
+            print(f"[!] Extension lock error: {e}")
 
 
     # ── Registry Snap Lock ────────────────────────────────────────────────
+    def _write_snap_registry(self, disable: bool):
+        """Write snap-related registry keys WITHOUT restarting Explorer.
+        Used for periodic re-enforcement during Study Mode.
+        """
+        import winreg
+        val_str = "0" if disable else "1"
+        val_int = 0 if disable else 1
+
+        k1 = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Control Panel\Desktop", 0, winreg.KEY_SET_VALUE)
+        winreg.SetValueEx(k1, "WindowArrangementActive", 0, winreg.REG_SZ, val_str)
+        winreg.CloseKey(k1)
+
+        k2 = winreg.CreateKey(winreg.HKEY_CURRENT_USER,
+                              r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced")
+        winreg.SetValueEx(k2, "SnapAssist", 0, winreg.REG_DWORD, val_int)
+        winreg.SetValueEx(k2, "EnableSnapBar", 0, winreg.REG_DWORD, val_int)
+        winreg.CloseKey(k2)
+
     def _apply_snap_lock(self, enable: bool):
-        """Enable or disable Windows Snap Assist via Registry + live broadcast."""
+        """Enable or disable Windows Snap Assist via Registry + Explorer restart.
+
+        We do NOT use SystemParametersInfoW (undocumented SPI codes corrupt state).
+        Registry + Explorer restart is the only reliable method.
+        """
         try:
-            import winreg
+            import subprocess
 
-            val_str = "0" if enable else "1"
-            val_int = 0 if enable else 1
+            self._write_snap_registry(disable=enable)
 
-            # Key 1: Main snap zone toggle
-            k1 = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                                r"Control Panel\Desktop", 0, winreg.KEY_SET_VALUE)
-            winreg.SetValueEx(k1, "WindowArrangementActive", 0, winreg.REG_SZ, val_str)
-            winreg.CloseKey(k1)
-
-            # Key 2: SnapAssist suggestions after first snap
-            k2 = winreg.CreateKey(winreg.HKEY_CURRENT_USER,
-                                  r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced")
-            winreg.SetValueEx(k2, "SnapAssist", 0, winreg.REG_DWORD, val_int)
-            # Key 3: Windows 11 layout picker on maximize hover
-            winreg.SetValueEx(k2, "EnableSnapBar", 0, winreg.REG_DWORD, val_int)
-            winreg.CloseKey(k2)
-
-            # Instantly apply via SystemParametersInfo (no reboot needed)
-            SPI_SETSNAPSIZING = 0x008F
-            SPI_SETDOCKMOVING = 0x0091
-            SPIF_FLAGS = 0x01 | 0x02  # SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE
-            ctypes.windll.user32.SystemParametersInfoW(SPI_SETSNAPSIZING, val_int, 0, SPIF_FLAGS)
-            ctypes.windll.user32.SystemParametersInfoW(SPI_SETDOCKMOVING,  val_int, 0, SPIF_FLAGS)
-
-            # Broadcast WM_SETTINGCHANGE so Explorer picks up changes immediately
-            HWND_BROADCAST = 0xFFFF
-            WM_SETTINGCHANGE = 0x001A
-            res = ctypes.c_ulong()
-            ctypes.windll.user32.SendMessageTimeoutW(
-                HWND_BROADCAST, WM_SETTINGCHANGE, 0,
-                "WindowArrangementActive", 0x0002, 5000, ctypes.byref(res))
+            # Restart Explorer to apply changes immediately
+            subprocess.run(["taskkill", "/F", "/IM", "explorer.exe"],
+                           capture_output=True, timeout=5)
+            time.sleep(0.5)
+            subprocess.Popen("explorer.exe")
 
             self._snap_locked = enable
-            print(f"[*] Snap Assist {'LOCKED' if enable else 'RESTORED'}")
+            print(f"[*] Snap Assist {'LOCKED' if enable else 'RESTORED'} (Explorer restarted)")
         except Exception as e:
             print(f"[!] Snap lock error: {e}")
 
@@ -550,7 +589,7 @@ class ActivityTracker:
         
         Skips style stripping on UWP/modern apps (ApplicationFrameHost children)
         since they render their own chrome and ignore WS_MINIMIZEBOX.
-        Calls SetWindowLongW/SetWindowPos only ONCE per hwnd.
+        Strips styles only ONCE per hwnd (tracked in self._modified_windows).
         """
         if not hwnd:
             return
@@ -561,57 +600,109 @@ class ActivityTracker:
             if not bool(u32.IsZoomed(hwnd)):
                 u32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE
 
-            # Step 2: Strip title bar buttons — only on new window, skip UWP
-            if hwnd != self._locked_hwnd:
-                self._restore_window()
-
-                # Detect UWP: parent class is "ApplicationFrameWindow"
+            # Step 2: Strip title bar buttons — only once per hwnd, skip UWP
+            if hwnd not in self._modified_windows:
+                # Detect UWP: class is "ApplicationFrameWindow" or "Windows.UI.Core.CoreWindow"
                 buf = ctypes.create_unicode_buffer(64)
-                ctypes.windll.user32.GetClassNameW(hwnd, buf, 64)
-                is_uwp = buf.value in ("ApplicationFrameWindow", "Windows.UI.Core.CoreWindow")
+                u32.GetClassNameW(hwnd, buf, 64)
+                is_uwp = buf.value in ("ApplicationFrameWindow", "Windows.UI.Core.CoreWindow",
+                                       "WinUIDesktopWin32WindowClass")
 
                 style = u32.GetWindowLongW(hwnd, -16)  # GWL_STYLE
-                if style:
-                    self._locked_hwnd = hwnd
-                    self._locked_style = style
-                    self._style_applied = False
-
-                    if not is_uwp:
-                        stripped = style & ~0x00020000 & ~0x00010000 & ~0x00040000
-                        if stripped != style:
-                            u32.SetWindowLongW(hwnd, -16, stripped)
-                            u32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)
-                            self._style_applied = True
+                if style and not is_uwp:
+                    stripped = style & ~0x00020000 & ~0x00010000 & ~0x00040000
+                    if stripped != style:
+                        self._modified_windows[hwnd] = style  # Save original
+                        u32.SetWindowLongW(hwnd, -16, stripped)
+                        u32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)
 
         except Exception as e:
             print(f"[!] enforce_study_window error: {e}")
 
     # ── Restore Everything ───────────────────────────────────────────────
-    def _restore_window(self):
-        """Restore the previously locked window's original style."""
-        if self._locked_hwnd and self._locked_style:
+    def _restore_all_windows(self):
+        """Restore ALL windows that had their styles stripped during Study Mode.
+        
+        Two-pass approach:
+          1. Restore tracked windows from _modified_windows (exact original style)
+          2. Sweep ALL visible windows and re-add WS_MINIMIZEBOX/MAXIMIZEBOX/THICKFRAME
+             if they're missing — catches Edge InPrivate, new windows, etc.
+        """
+        u32 = ctypes.windll.user32
+        WS_MINIMIZEBOX = 0x00020000
+        WS_MAXIMIZEBOX = 0x00010000
+        WS_THICKFRAME  = 0x00040000
+        REQUIRED_FLAGS = WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME
+
+        # Pass 1: Restore tracked windows with their exact saved style
+        for hwnd, original_style in self._modified_windows.items():
             try:
-                u32 = ctypes.windll.user32
-                u32.SetWindowLongW(self._locked_hwnd, -16, self._locked_style)
-                u32.SetWindowPos(self._locked_hwnd, 0, 0, 0, 0, 0, 0x0027)
+                u32.SetWindowLongW(hwnd, -16, original_style)
+                u32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)  # SWP_FRAMECHANGED
             except Exception:
                 pass
-        self._locked_hwnd = None
-        self._locked_style = None
+        tracked_count = len(self._modified_windows)
+        self._modified_windows.clear()
+
+        # Pass 2: Sweep ALL visible windows and fix any that are missing flags
+        sweep_count = 0
+        try:
+            for win in get_visible_windows():
+                hwnd = win["hwnd"]
+                try:
+                    style = u32.GetWindowLongW(hwnd, -16)
+                    if not style:
+                        continue
+                    # Only fix windows that should have these flags but don't
+                    # (Skip windows that naturally lack them, like system trays)
+                    # Check: if ANY of the three flags are missing but the window
+                    # has WS_CAPTION (0x00C00000), it's a regular app window
+                    has_caption = bool(style & 0x00C00000)
+                    missing_flags = REQUIRED_FLAGS & ~style
+                    if has_caption and missing_flags:
+                        fixed_style = style | REQUIRED_FLAGS
+                        u32.SetWindowLongW(hwnd, -16, fixed_style)
+                        u32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)
+                        # Force title bar redraw
+                        u32.RedrawWindow(hwnd, None, None, 0x0401)  # RDW_FRAME | RDW_INVALIDATE
+                        sweep_count += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        total = tracked_count + sweep_count
+        if total:
+            print(f"[*] Restored styles on {tracked_count} tracked + {sweep_count} swept window(s)")
 
     def _on_mode_changed(self, old_mode: str, new_mode: str):
         """Called whenever focus_mode changes in the DB."""
         if new_mode == "study":
             self._apply_snap_lock(True)
-        elif old_mode == "study":
-            self._restore_window()
-            self._apply_snap_lock(False)
+            self._lock_extension_pages(True)
+            print("[*] Study Mode ON — window enforcement active")
+        elif new_mode == "productive":
+            # Productive mode: no window enforcement, but lock extension pages
+            if old_mode == "study":
+                self._restore_all_windows()
+                self._apply_snap_lock(False)
+            self._lock_extension_pages(True)
+            print("[*] Productive Mode ON — extension pages locked")
+        else:
+            # Mode is "off" — lift ALL restrictions
+            if old_mode == "study":
+                self._restore_all_windows()
+                self._apply_snap_lock(False)
+            self._lock_extension_pages(False)
+            print("[*] Mode OFF — all restrictions lifted")
 
     def stop(self):
         self._running = False
-        self._restore_window()
+        self._restore_all_windows()
         if self._snap_locked:
             self._apply_snap_lock(False)
+        if self._extensions_locked:
+            self._lock_extension_pages(False)
 
     # ── WinEvent-Driven Study Enforcer ───────────────────────────────────
     def _study_enforcer_loop(self):
@@ -712,13 +803,25 @@ class ActivityTracker:
                 hooks.append(h)
 
         # Message pump — WinEvent hooks require a message loop on their thread
+        # Also periodically re-enforce snap registry keys to prevent manual override
         msg = ctypes.wintypes.MSG()
+        last_snap_check = time.time()
+        SNAP_RECHECK = 10  # Re-write snap keys every 10 seconds during study mode
+
         while self._running:
             result = u32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1)  # PM_REMOVE
             if result > 0:
                 u32.TranslateMessage(ctypes.byref(msg))
                 u32.DispatchMessageW(ctypes.byref(msg))
             else:
+                # Periodically re-enforce snap lock during study mode
+                now = time.time()
+                if self._current_mode == "study" and now - last_snap_check >= SNAP_RECHECK:
+                    try:
+                        self._write_snap_registry(disable=True)
+                    except Exception:
+                        pass
+                    last_snap_check = now
                 time.sleep(0.01)
 
         for h in hooks:
@@ -727,7 +830,7 @@ class ActivityTracker:
     def _run_loop(self):
         """Main tracking loop — runs every 2 seconds."""
         POLL_INTERVAL = 2
-        FLUSH_INTERVAL = 30  # Write to DB every 30 seconds
+        FLUSH_INTERVAL = 10  # Write to DB every 10 seconds for responsive dashboard
         TOKEN_INTERVAL = 60  # Check tokens every minute
         MODE_REFRESH = 30    # Re-read mode from DB every 30s
 
@@ -782,45 +885,27 @@ class ActivityTracker:
                             and buf.value not in system_classes:
                         self._enforce_study_window(fg_hwnd)
                 elif self._current_mode != "study":
-                    # Mode turned off — restore the locked window once
-                    if self._locked_hwnd:
-                        self._restore_window()
+                    # Mode turned off — restore all modified windows
+                    if self._modified_windows:
+                        self._restore_all_windows()
 
 
-                # Get all visible windows to track concurrently
-                active_windows = get_visible_windows() if not is_minimized else [info]
-                if not active_windows:
-                    active_windows = [info]
+                # ── Track time for the FOREGROUND window only ─────────────────
+                app = info["app"]
+                title = info["title"]
+                is_maximized = info.get("is_maximized", True)
 
-                # Log total active time explicitly (1 second per 1 real second!)
-                # We log this under 'Focus_Engine_Global_Active' to ensure the total time doesn't multiply!
-                if not is_minimized and info["app"] != "explorer.exe" and info["title"]:
-                    global_key = ("Focus_Engine_Global_Active", "system")
-                    if global_key not in self._accumulated:
-                        self._accumulated[global_key] = {"seconds": 0, "last_title": "Global Time"}
-                    self._accumulated[global_key]["seconds"] += POLL_INTERVAL
-
-                for win in active_windows:
-                    app = win["app"]
-                    title = win["title"]
-                    is_maximized = win.get("is_maximized", True)
-                    win_is_minimized = win.get("is_minimized", False)
-
-                    if win_is_minimized or not app or app == "Unknown" or title == "":
-                        category = "idle"
-                        app = "explorer.exe"
-                        title = "Desktop"
-                    else:
-                        category = classify_activity(app, title, is_maximized, mode=self._current_mode)
-
-                    if app.lower() in SYSTEM_BACKGROUND_PROCESSES:
-                        continue
-
+                if is_minimized or not app or app == "Unknown" or title == "":
+                    category = "idle"
+                    friendly = "Desktop"
+                else:
+                    category = classify_activity(app, title, is_maximized, mode=self._current_mode)
                     friendly = get_friendly_name(app)
                     if friendly == "Explorer":
                         friendly = "Desktop"
 
-                    # ── Screen-time accumulation ──
+                if app.lower() not in SYSTEM_BACKGROUND_PROCESSES:
+                    # ── Screen-time accumulation (foreground app only) ──
                     if app.lower() not in BROWSER_APPS and category != "idle":
                         key = (friendly, category)
                         if key not in self._accumulated:
@@ -829,17 +914,18 @@ class ActivityTracker:
                         self._accumulated[key]["last_title"] = title
 
                     # ── Update live recent-activity list ──
-                    if win["hwnd"] == fg_hwnd:
-                        self._update_recent_activities(friendly, category, title, POLL_INTERVAL)
+                    self._update_recent_activities(friendly, category, title, POLL_INTERVAL)
 
-                # Spotify tracking (use foreground info for logic flow to avoid duplicate triggers)
-                app = info["app"]
-                title = info["title"]
+                # ── Spotify tracking ───────────────────────────────────────
+                # Detect current track (foreground OR background) for display,
+                # and accumulate listen seconds whenever music is playing.
+                fg_app = info["app"]
+                fg_title = info["title"]
+                spotify_is_foreground = fg_app.lower() == SPOTIFY_EXE
 
-                # ── Spotify tracking (even when Spotify is in background) ──────
                 spotify_title = None
-                if app.lower() == SPOTIFY_EXE:
-                    spotify_title = title
+                if spotify_is_foreground:
+                    spotify_title = fg_title
                 else:
                     bg_title = find_spotify_title()
                     if bg_title:
@@ -882,6 +968,7 @@ class ActivityTracker:
                                 except Exception:
                                     pass
                         else:
+                            # Same track — count listen time (foreground AND background)
                             self._spotify_listen_seconds += POLL_INTERVAL
                             if self._spotify_log:
                                 self._spotify_log[-1]["duration"] = self._spotify_listen_seconds
@@ -997,6 +1084,27 @@ class ActivityTracker:
                 db.spend_tokens(whole_tokens, "gaming_time")
                 self._gaming_token_fraction -= whole_tokens
             self._gaming_accumulator = 0
+
+    def on_study_media_tick(self, seconds: int):
+        """Called by api_server when extension confirms study video is playing.
+        
+        Conditions already verified by the extension:
+          1. Mode is study
+          2. Window is maximized/fullscreen
+          3. Media (<video>/<audio>) is actively playing
+          4. Domain is study-classified
+        
+        Awards 1 token every 120 seconds (2 minutes) of verified watch time.
+        """
+        self._study_video_seconds += seconds
+        next_threshold = self._study_video_token_awarded + 120
+
+        if self._study_video_seconds >= next_threshold:
+            tokens_to_award = (self._study_video_seconds - self._study_video_token_awarded) // 120
+            if tokens_to_award > 0:
+                db.earn_tokens(tokens_to_award, "study_video")
+                self._study_video_token_awarded += tokens_to_award * 120
+                print(f"[*] Study video token: +{tokens_to_award} (total watch: {self._study_video_seconds}s)")
 
     def get_current_activity(self) -> dict:
         """Return what's happening right now (for live dashboard feed)."""

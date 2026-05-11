@@ -550,32 +550,49 @@ def log_killed_process(process_name: str, reason: str = ""):
 
 # ─── Recent Web Activity ─────────────────────────────────────────────────
 
-def get_recent_web_activity(limit: int = 20) -> list:
-    """Return the most recent web activity entries, aggregated by domain+page_title.
-    Shows one entry per page with total accumulated time."""
+def get_recent_web_activity(limit: int = 20, date: str = None) -> list:
+    """Return the most recent web activity entries for a given date,
+    aggregated by domain+page_title. Shows one entry per page with total accumulated time."""
+    if date is None:
+        date = datetime.date.today().isoformat()
     conn = _get_conn()
     rows = conn.execute(
         """SELECT MAX(timestamp) as timestamp, domain, url, page_title,
                   category, SUM(seconds) as seconds
            FROM web_time
-           WHERE category != 'blocked'
+           WHERE category != 'blocked' AND date = ?
            GROUP BY domain, page_title
            ORDER BY MAX(id) DESC LIMIT ?""",
-        (limit,),
+        (date, limit),
     ).fetchall()
     return [dict(r) for r in rows]
 
 
 def get_spotify_screen_time(date: str) -> int:
-    """Return total seconds of Spotify usage for a given date."""
+    """Return total seconds of Spotify usage for a given date.
+    Combines screen_time (foreground usage) and spotify_tracks (listen time)."""
     conn = _get_conn()
-    row = conn.execute(
+    # Screen time — tracker stores it under the friendly name 'Spotify'
+    screen_row = conn.execute(
         """SELECT COALESCE(SUM(seconds), 0) as total_sec
            FROM screen_time WHERE date = ?
-           AND (LOWER(app_name) = 'spotify.exe' OR LOWER(app_name) = 'spotify')""",
+           AND (LOWER(app_name) = 'spotify.exe'
+                OR LOWER(app_name) = 'spotify')""",
         (date,),
     ).fetchone()
-    return row["total_sec"] if row else 0
+    screen_sec = screen_row["total_sec"] if screen_row else 0
+
+    # Also check spotify_tracks for listen time (may be higher than screen time
+    # since the tracker accumulates listen seconds even when track hasn't changed)
+    track_row = conn.execute(
+        """SELECT COALESCE(SUM(listen_seconds), 0) as total_sec
+           FROM spotify_tracks WHERE date = ?""",
+        (date,),
+    ).fetchone()
+    track_sec = track_row["total_sec"] if track_row else 0
+
+    # Return the higher of the two (they overlap, so don't sum them)
+    return max(screen_sec, track_sec)
 
 
 # ─── Spotify Tracks ───────────────────────────────────────────────────────

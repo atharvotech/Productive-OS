@@ -225,50 +225,7 @@ class AuthManager:
 
 
 # ---------------------------------------------------------------------------
-# Terminal-based first-run setup (used by main.py)
-# ---------------------------------------------------------------------------
-
-def terminal_first_run_setup() -> AuthManager:
-    """Interactive terminal setup for first run. Returns configured AuthManager."""
-    auth = AuthManager()
-    if not auth.is_first_run():
-        return auth
-
-    print("\n" + "=" * 60)
-    print("  🔐 FOCUS ENGINE PRO — First Run Setup")
-    print("=" * 60)
-    print("\nYou need to set an Admin Password.")
-    print("This password protects your engine from being disabled impulsively.\n")
-
-    while True:
-        pw = input("  Set Admin Password (min 4 chars): ").strip()
-        if len(pw) < 4:
-            print("  ❌ Password too short. Try again.")
-            continue
-        pw2 = input("  Confirm Password: ").strip()
-        if pw != pw2:
-            print("  ❌ Passwords don't match. Try again.")
-            continue
-        break
-
-    print("\n  Now pick a Security Question (for password recovery):\n")
-    for i, q in enumerate(SECURITY_QUESTIONS):
-        print(f"    [{i + 1}] {q}")
-
-    while True:
-        try:
-            choice = int(input("\n  Enter choice (1-5): ").strip()) - 1
-            if 0 <= choice < len(SECURITY_QUESTIONS):
-                break
-        except ValueError:
-            pass
-        print("  ❌ Invalid choice.")
-
-    answer = input(f"\n  Answer: \"{SECURITY_QUESTIONS[choice]}\"\n  > ").strip()
-    while not answer:
-        answer = input("  ❌ Answer cannot be empty. Try again: ").strip()
-
-    auth.set_password(pw, choice, answer)
-    print("\n  ✅ Admin password and security question saved!")
-    print("=" * 60 + "\n")
-    return auth
+# NOTE: First-run setup is now handled in the web dashboard UI.
+# The API action "first_run_setup" in api_server.py calls auth.set_password()
+# directly after the user fills the setup form in the browser.
+# ---------------------------------------------------------------------------

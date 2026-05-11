@@ -21,10 +21,14 @@ const WS_URL = "ws://localhost:8765";
 const SYNC_INTERVAL_SEC = 30;
 const FOCUS_CHECK_INTERVAL_SEC = 15;
 
-// Always-blocked URL keywords (even outside any mode)
+// Always-blocked URL keywords (adult content — blocked in ALL modes, even "off")
 const ALWAYS_BLOCKED_KEYWORDS = [
   "pornhub", "xvideos", "xnxx", "xhamster", "redtube",
   "youporn", "spankbang", "brazzers", "onlyfans",
+];
+
+// Distraction URL keywords — blocked only in productive/study mode (NOT when "off")
+const MODE_BLOCKED_KEYWORDS = [
   "tiktok.com", "/reels", "/shorts",
 ];
 
@@ -38,7 +42,7 @@ const STUDY_BLOCKED_DOMAINS = [
   "9gag.com", "buzzfeed.com", "imgur.com",
 ];
 
-// Productive-mode: always blocked even in productive mode
+// Productive-mode: social media distractions blocked (devs don't need these)
 const PRODUCTIVE_ALWAYS_BLOCKED = [
   "instagram.com", "snapchat.com", "tiktok.com",
 ];
@@ -105,6 +109,10 @@ let domainTimers = {};
 // Productive mode time limits from server
 let productiveTimers = { ...PRODUCTIVE_TIMED_DEFAULTS };
 
+// Media playing state — tracked per tab from content.js
+let mediaPlayingTabId = null; // Tab ID where media is currently playing
+let mediaPlaying = false;     // Is media playing in the active tab?
+
 // ─── WebSocket Connection ────────────────────────────────────────────────
 
 function connectWebSocket() {
@@ -166,6 +174,8 @@ function handleServerMessage(data) {
       console.log(`[FEP] Mode: ${currentMode}`);
       // Reset domain timers when mode changes
       domainTimers = {};
+      // Immediately scan all open tabs and block any that violate new mode
+      enforceBlockedTabs();
     }
     // Load productive timers from server
     if (data.productive_timers) {
@@ -175,6 +185,7 @@ function handleServerMessage(data) {
     currentMode = data.mode || "off";
     chrome.storage.local.set({ currentMode });
     domainTimers = {};
+    enforceBlockedTabs();
   } else if (data.action === "settings") {
     const channels = data.data?.whitelisted_channels || "";
     whitelistedChannels = channels.split(",").map(c => c.trim().toLowerCase()).filter(Boolean);
@@ -189,6 +200,28 @@ function handleServerMessage(data) {
       });
     }
   }
+}
+
+/**
+ * Scan ALL open tabs and block any that violate the current mode.
+ * Called immediately when mode changes so already-loaded pages get caught.
+ */
+function enforceBlockedTabs() {
+  if (currentMode === "off") return; // Nothing to enforce in off mode
+
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      if (!tab.url || tab.url.startsWith("chrome") || tab.url.startsWith("edge") || tab.url.startsWith("data:")) {
+        continue;
+      }
+      const { block, reason } = shouldBlockUrl(tab.url, tab.title || "");
+      if (block) {
+        const blockedHtml = `data:text/html,${encodeURIComponent(getBlockedPageHTML(reason))}`;
+        chrome.tabs.update(tab.id, { url: blockedHtml });
+        console.log(`[FEP] Blocked already-open tab: ${tab.url}`);
+      }
+    }
+  });
 }
 
 // ─── Time Tracking ───────────────────────────────────────────────────────
@@ -455,10 +488,19 @@ function shouldBlockUrl(url, title = "") {
   const domain = getDomain(url);
   const titleLower = (title || "").toLowerCase();
 
-  // Always blocked (adult content, tiktok, reels, shorts)
+  // Always blocked (adult content — even when mode is off)
   for (const kw of ALWAYS_BLOCKED_KEYWORDS) {
     if (urlLower.includes(kw)) {
       return { block: true, reason: `Blocked keyword: ${kw}` };
+    }
+  }
+
+  // Distraction keywords (reels, shorts, tiktok) — only in productive/study mode
+  if (currentMode === "productive" || currentMode === "study") {
+    for (const kw of MODE_BLOCKED_KEYWORDS) {
+      if (urlLower.includes(kw)) {
+        return { block: true, reason: `Blocked keyword: ${kw} (${currentMode} mode)` };
+      }
     }
   }
 
@@ -638,8 +680,21 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 chrome.windows.onFocusChanged.addListener((windowId) => {
   tickTime();
   if (windowId === chrome.windows.WINDOW_ID_NONE) {
-    browserHasFocus = false;
-    activeTabDomain = "";
+    // WINDOW_ID_NONE fires when browser enters fullscreen OR actually loses focus.
+    // Check if any window is in fullscreen — if so, browser is still active.
+    chrome.windows.getAll({ populate: false }, (windows) => {
+      const fullscreenWin = windows.find(w => w.state === "fullscreen");
+      if (fullscreenWin) {
+        // Browser is in fullscreen, NOT defocused — keep tracking
+        browserHasFocus = true;
+        activeWindowState = "fullscreen";
+        // Don't clear activeTabDomain — keep counting time
+      } else {
+        // Genuinely lost focus (user switched to another app)
+        browserHasFocus = false;
+        activeTabDomain = "";
+      }
+    });
   } else {
     browserHasFocus = true;
     chrome.windows.get(windowId, (win) => {
@@ -672,6 +727,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else {
       sendResponse({ action: "allow" });
     }
+  } else if (message.type === "media_status") {
+    // Content script reports media play/pause state
+    const tabId = sender.tab?.id;
+    if (message.playing) {
+      mediaPlaying = true;
+      mediaPlayingTabId = tabId;
+    } else if (tabId === mediaPlayingTabId) {
+      // Only clear if THIS tab was the one playing
+      mediaPlaying = false;
+      mediaPlayingTabId = null;
+    }
+    sendResponse({ action: "ack" });
   }
   return true;
 });
@@ -681,6 +748,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.alarms.create("syncTime", { periodInMinutes: SYNC_INTERVAL_SEC / 60 });
 chrome.alarms.create("checkFocus", { periodInMinutes: FOCUS_CHECK_INTERVAL_SEC / 60 });
 chrome.alarms.create("tickTime", { periodInMinutes: 0.05 }); // Every 3 seconds
+chrome.alarms.create("studyMediaHeartbeat", { periodInMinutes: 0.05 }); // Every 3 seconds
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "syncTime") {
@@ -690,6 +758,27 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   } else if (alarm.name === "tickTime") {
     tickTime();
     if (browserHasFocus) updateActiveTab();
+  } else if (alarm.name === "studyMediaHeartbeat") {
+    // Send study media status to backend if conditions are met:
+    // 1. Mode is study
+    // 2. Media is playing in active tab
+    // 3. Window is maximized/fullscreen
+    // 4. Active domain is study-classified
+    if (currentMode !== "study" || !mediaPlaying || !browserHasFocus) return;
+    if (mediaPlayingTabId !== activeTabId) return;
+
+    const isMaximized = activeWindowState === "maximized" || activeWindowState === "fullscreen";
+    if (!isMaximized) return;
+
+    const category = classifyDomain(activeTabDomain, activeTabTitle, true);
+    if (category !== "study" && category !== "productivity") return;
+
+    sendWS({
+      action: "study_media_tick",
+      domain: activeTabDomain,
+      title: activeTabTitle,
+      seconds: 3, // heartbeat interval
+    });
   }
 });
 

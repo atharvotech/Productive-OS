@@ -51,18 +51,20 @@ class Watchdog:
 
         # Determine the command to run
         if getattr(sys, 'frozen', False):
-            # Running as .exe
+            # Running as .exe — Task Scheduler runs the .exe directly with --background
             program = sys.executable
-            args = ""
+            args = "--background"
         else:
-            # Running as .py script
-            python_exe = sys.executable
+            # Running as .py script — use pythonw.exe (no console window) + --background
+            pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+            if not os.path.exists(pythonw):
+                pythonw = sys.executable  # fallback to python.exe
             script = os.path.join(_base_dir(), "main.py")
-            program = python_exe
-            args = f'"{script}"'
+            program = pythonw
+            args = f'"{script}" --background'
 
         try:
-            # Create task: run at logon with highest privileges
+            # Create task: run at logon with highest privileges, hidden window
             cmd = [
                 "schtasks", "/Create",
                 "/TN", TASK_NAME,
@@ -73,7 +75,7 @@ class Watchdog:
             ]
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
-                print(f"  [+] Scheduled task '{TASK_NAME}' created (runs at login)")
+                print(f"  [+] Scheduled task '{TASK_NAME}' created (runs at login, hidden)")
                 return True
             else:
                 print(f"  [!] Failed to create task: {result.stderr.strip()}")
@@ -81,6 +83,7 @@ class Watchdog:
         except Exception as e:
             print(f"  [!] Task Scheduler error: {e}")
             return False
+
 
     def remove_scheduled_task(self) -> bool:
         """Remove the scheduled task (called on uninstall/disable)."""

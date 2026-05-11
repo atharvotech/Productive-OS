@@ -7,7 +7,7 @@
 
 <br/><br/>
 
-# 🧠 Productive-OS (Atharotech)
+# 🧠 Productive-OS v3.5 (Atharvotech™)
 ### *Your AI-Powered Study Partner — Not Just Another Website Blocker*
 
 **The only Windows productivity tool that locks down your entire system, rewards your focus with real points, and fights back when you try to cheat.**
@@ -31,6 +31,12 @@ And when you actually study? It **rewards** you — with a token system that unl
 ---
 
 ## ✨ Feature Breakdown
+
+### 🆕 What's New in v3.5
+- **Invisible Background Engine:** Productive-OS now runs entirely in the background as a headless Windows service. No more persistent console windows cluttering your taskbar.
+- **Flawless Tracking & Sync:** Fixed a critical bug where screen time and Spotify listening metrics would occasionally zero-out. Background music listening is now accurately aggregated alongside foreground activity, and web tracking strictly filters by the current day.
+- **Lightning Fast Dashboard:** Real-time data flushing has been optimized (from 30s down to 10s intervals), and the dashboard now implements local caching. This means instant UI updates and zero loading flashes when you open your stats.
+- **Graceful & Forceful Termination:** The engine now guarantees clean process termination when disabled from the dashboard. No more ghost processes lingering in your system memory.
 
 ### 🔒 System-Level Lockdown
 SATHI does not rely on browser extensions alone. It operates at the OS level — modifying DNS settings, writing to the Windows Registry, and using process-level controls to enforce your session. This means it works across **all browsers, all apps, and all windows** at once.
@@ -68,8 +74,8 @@ You set a master password during first-run setup. If anyone — including you �
 |-------|------------|
 | **Backend Core** | Python — `psutil`, `winreg`, `ctypes`, `threading`, `msvcrt` |
 | **Data & Auth** | SQLite3, bcrypt |
-| **Real-Time API** | WebSockets (Port 8765) + HTTP Server (Port 8080) |
-| **Frontend Dashboard** | HTML5, CSS3 (Glassmorphism), Vanilla JS, Chart.js |
+| **Real-Time API** | WebSockets (Port 8765) + HTTP Server (Port 8123) |
+| **Frontend Dashboard** | HTML5, CSS3 (Glassmorphism), Vanilla JS, Chart.js, `pywebview` |
 | **Browser Integration** | Chrome Extension — Manifest V3 + Background Service Workers |
 
 ---
@@ -104,8 +110,9 @@ On your very first run, an interactive prompt will guide you through creating yo
 
 ### Step 4 — Open Your Dashboard
 
+If you ran it normally, a native UI window will open automatically. If you run it in the background or open your browser manually, navigate to:
 ```
-http://localhost:8080
+http://localhost:8123
 ```
 
 Your focus engine is live.
@@ -158,7 +165,7 @@ On the web dashboard or terminal, select **"Forgot Password"**. You will be aske
 Ensure `main.py` was launched with Administrator privileges. SATHI writes to the `HKLM` Windows Registry hive, which is inaccessible to standard user processes and causes silent failures without elevation.
 
 **The dashboard is not loading.**
-Check your terminal to confirm that ports `8080` (HTTP) and `8765` (WebSocket) are free. On Windows, run `netstat -ano | findstr :8080` to identify any conflicting process.
+Check your terminal to confirm that ports `8123` (HTTP) and `8765` (WebSocket) are free. On Windows, run `netstat -ano | findstr :8123` to identify any conflicting process.
 
 **A game is slipping through and not being detected.**
 SATHI uses process name matching and heuristic scanning. If a specific game is not being caught, please open a GitHub issue with the executable name and we will add it to the detection list.
@@ -172,7 +179,7 @@ SATHI uses process name matching and heuristic scanning. If a specific game is n
 - [x] Custom Chrome Extension integration
 - [x] Admin password & watchdog self-protection
 - [x] Family-safe DNS auto-configuration
-- [ ] Package the entire Python backend into a single `.exe` using PyInstaller
+- [x] Package the entire Python backend into a single `.exe` using PyInstaller (`build.py`)
 - [ ] Strict **Pomodoro Mode** with enforced break timers
 - [ ] Mobile dashboard companion for viewing stats from your phone
 - [ ] Weekly focus reports sent to your email
@@ -200,7 +207,7 @@ Productive-OS makes real, active changes to your Windows OS — including modify
 ---
 
 <div align="center">
-<h2>Made with ❤️ in INDIA By <i>ATHARVOECH-THE WORLD OF INFINTE CREATIVITY</i></h2>
-© 2026 Atharvotech(Atharv Shukla). All Rights Reserved. This is a personal project and is currently closed for external distribution or modification.
+<h2>Made with ❤️ in INDIA By <i>ATHARVOTECH™—THE WORLD OF INFINTE CREATIVITY</i></h2>
+© 2026 Atharvotech™(Atharv Shukla). All Rights Reserved. This is a personal project and is currently closed for external distribution or modification.
 
 </div>

@@ -12,8 +12,42 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
+    <!-- ═══ First-Run Setup Overlay ═══ -->
+    <div id="first-run-overlay" class="first-run-overlay hidden">
+        <div class="first-run-card">
+            <div class="first-run-logo">
+                <span class="first-run-icon">🔥</span>
+                <h1>Welcome to Productive-OS</h1>
+                <p class="first-run-subtitle">Set your admin password to get started. This password protects your focus engine from being disabled impulsively.</p>
+            </div>
+            <div class="first-run-form" id="first-run-form">
+                <div class="form-group">
+                    <label for="setup-password">Admin Password</label>
+                    <input type="password" id="setup-password" class="modal-input" placeholder="Min. 4 characters" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label for="setup-password-confirm">Confirm Password</label>
+                    <input type="password" id="setup-password-confirm" class="modal-input" placeholder="Repeat password" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label for="setup-security-question">Security Question</label>
+                    <select id="setup-security-question" class="modal-input setup-select"></select>
+                </div>
+                <div class="form-group">
+                    <label for="setup-security-answer">Your Answer</label>
+                    <input type="text" id="setup-security-answer" class="modal-input" placeholder="Your answer (stored securely)" autocomplete="off">
+                </div>
+                <div class="first-run-error hidden" id="first-run-error"></div>
+                <button class="btn btn-primary first-run-btn" id="btn-first-run-submit">
+                    🚀 Activate Focus Engine
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Connection Status Banner -->
     <div id="connection-banner" class="connection-banner hidden">
+
         <span class="connection-icon">⚡</span>
         <span class="connection-text">Connecting to Focus Engine...</span>
     </div>
@@ -448,18 +482,38 @@
                 </div>
 
                 <!-- Security -->
-                <div class="settings-card">
+                <div class="settings-card wide">
                     <div class="settings-card-header">
                         <span class="settings-icon">🔐</span>
-                        <h3>Security</h3>
+                        <h3>Security & Engine Control</h3>
                     </div>
                     <button class="btn btn-secondary" id="btn-change-password">Change Password</button>
-                    <div style="height: 1rem;"></div>
-                    <button class="btn btn-danger" id="btn-disable-engine">⚡ Disable Engine</button>
+                    <div style="height: 1.5rem;"></div>
+                    <!-- Prominent Disable Engine section -->
+                    <div class="disable-engine-panel">
+                        <div class="disable-engine-header">
+                            <span class="disable-icon">⚡</span>
+                            <div>
+                                <h4>Disable Engine</h4>
+                                <p class="disable-desc">Stops all monitoring, DNS blocking, and process enforcement. Engine will NOT auto-restart until next login.</p>
+                                <span class="dev-badge">DEV PHASE</span>
+                            </div>
+                        </div>
+                        <button class="btn btn-danger btn-disable-engine-large" id="btn-disable-engine">
+                            ⚡ Disable Focus Engine
+                        </button>
+                    </div>
                 </div>
+            </div>
+
+            <!-- Disclaimer -->
+            <div class="developer-disclaimer">
+                <p>Developed with ❤️ by <strong>Atharvotech™</strong> (Atharv Shukla)</p>
+                <p><small>© 2026 Atharvotech™. All Rights Reserved.</small></p>
             </div>
         </section>
     </main>
+
 
     <!-- ═══ Password Modal ═══ -->
     <div id="password-modal" class="modal-overlay hidden">

@@ -151,4 +151,64 @@
   if (titleEl) {
     titleObserver.observe(titleEl, { childList: true, characterData: true, subtree: true });
   }
+
+  // ─── Media Playing Detection ─────────────────────────────────────────
+  // Detects <video> and <audio> play/pause state and reports to background.js
+  // so the backend knows if study content is actually being watched.
+
+  let _lastMediaState = null;
+
+  function reportMediaState(playing) {
+    if (playing === _lastMediaState) return; // No change, skip
+    _lastMediaState = playing;
+    try {
+      chrome.runtime.sendMessage(
+        { type: "media_status", playing: playing, url: window.location.href },
+        () => { if (chrome.runtime.lastError) { /* ignored */ } }
+      );
+    } catch (e) { /* extension context invalidated */ }
+  }
+
+  function checkAnyMediaPlaying() {
+    const mediaElements = document.querySelectorAll("video, audio");
+    for (const el of mediaElements) {
+      if (!el.paused && !el.ended && el.readyState > 2) {
+        reportMediaState(true);
+        return;
+      }
+    }
+    reportMediaState(false);
+  }
+
+  function attachMediaListeners(el) {
+    if (el._fepListenersAttached) return;
+    el._fepListenersAttached = true;
+    el.addEventListener("play", () => checkAnyMediaPlaying());
+    el.addEventListener("pause", () => checkAnyMediaPlaying());
+    el.addEventListener("ended", () => checkAnyMediaPlaying());
+    el.addEventListener("playing", () => checkAnyMediaPlaying());
+  }
+
+  // Attach to existing media elements
+  document.querySelectorAll("video, audio").forEach(attachMediaListeners);
+
+  // Watch for dynamically added media (YouTube SPA, pw.live player, etc.)
+  const mediaObserver = new MutationObserver((mutations) => {
+    for (const mut of mutations) {
+      for (const node of mut.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (node.tagName === "VIDEO" || node.tagName === "AUDIO") {
+          attachMediaListeners(node);
+        }
+        // Also check children of added nodes
+        if (node.querySelectorAll) {
+          node.querySelectorAll("video, audio").forEach(attachMediaListeners);
+        }
+      }
+    }
+  });
+  mediaObserver.observe(document.documentElement, { childList: true, subtree: true });
+
+  // Periodic heartbeat — re-check every 3 seconds in case events were missed
+  setInterval(checkAnyMediaPlaying, 3000);
 })();

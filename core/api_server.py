@@ -100,6 +100,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps(response_data).encode('utf-8'))
                 return
             except Exception as e:
+                print(f"[HTTP] API /api/v1/search Error: {e}")
                 self.send_response(500)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
@@ -107,7 +108,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 return
                 
         # For all other paths, serve static files
-        super().do_GET()
+        try:
+            super().do_GET()
+        except Exception as e:
+            print(f"[HTTP] Serve Error for {self.path}: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_error(500, f"Internal Error: {e}")
 
 
 
@@ -168,7 +175,34 @@ class APIServer:
         """Route incoming commands to appropriate handlers."""
         action = data.get("action", "")
 
+        # ── First-run setup (no auth, only works when no password set) ────
+        if action == "get_first_run_status":
+            return {
+                "action": "first_run_status",
+                "is_first_run": self.auth.is_first_run(),
+                "questions": list(
+                    __import__("core.auth", fromlist=["SECURITY_QUESTIONS"]).SECURITY_QUESTIONS
+                ),
+            }
+
+        elif action == "first_run_setup":
+            if not self.auth.is_first_run():
+                return {"action": "error", "message": "Password already configured."}
+            password = data.get("password", "")
+            question_index = data.get("question_index", 0)
+            answer = data.get("answer", "")
+            if len(password) < 4:
+                return {"action": "error", "message": "Password must be at least 4 characters."}
+            if not answer.strip():
+                return {"action": "error", "message": "Security answer cannot be empty."}
+            try:
+                self.auth.set_password(password, question_index, answer)
+                return {"action": "first_run_complete", "status": "ok"}
+            except Exception as e:
+                return {"action": "error", "message": str(e)}
+
         # ── Read-only commands (no auth required) ─────────────────────
+
         if action == "get_stats":
             return await self._get_stats(data)
 
@@ -281,6 +315,13 @@ class APIServer:
             category = data.get("category", "other")
             if domain and seconds > 0:
                 db.log_web_time(domain, url, title, category, seconds)
+            return {"action": "ack", "status": "ok"}
+
+        elif action == "study_media_tick":
+            # Extension confirms: study video playing + maximized + study mode
+            seconds = data.get("seconds", 0)
+            if seconds > 0 and self.tracker:
+                self.tracker.on_study_media_tick(seconds)
             return {"action": "ack", "status": "ok"}
 
         # ── Auth-required commands ────────────────────────────────────
@@ -430,10 +471,8 @@ class APIServer:
             top = db.get_top_apps(date)
             streak = db.get_streak()
             
-            # Use strict global active time to prevent split-screen overlap inflation
-            global_active = categories.get("system", 0)
-            app_sum = sum(v for k, v in categories.items() if k != "system")
-            total_sec = global_active if global_active > 0 else app_sum
+            # Total = sum of all real categories (exclude stale 'system' key if present)
+            total_sec = sum(v for k, v in categories.items() if k not in ("system", "idle"))
             
             return {
                 "action": "stats",
@@ -508,7 +547,7 @@ def start_api_server(auth: AuthManager, app_killer=None, tracker=None, dns_block
         try:
             today = datetime.date.today().isoformat()
             categories = db.get_category_totals(today)
-            total_sec = sum(categories.values())
+            total_sec = sum(v for k, v in categories.items() if k not in ("system", "idle"))
             tokens = db.get_token_balance()
             streak = db.get_streak()
             hourly = db.get_hourly_breakdown(today)

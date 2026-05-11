@@ -46,8 +46,8 @@ function connectWebSocket() {
             updateEngineStatus(true);
             showConnectionBanner(false);
             console.log("[Dashboard] WebSocket connected — server will push updates");
-            // Request initial data once; server will push updates after each flush
-            refreshAllData();
+            // Check if first run before loading full data
+            sendWS({ action: "get_first_run_status" });
         };
 
         ws.onmessage = (event) => {
@@ -114,6 +114,14 @@ function showConnectionBanner(show) {
 
 function handleMessage(data) {
     switch (data.action) {
+        case "first_run_status":
+            handleFirstRunStatus(data);
+            break;
+        case "first_run_complete":
+            hideFirstRunOverlay();
+            refreshAllData();
+            showToast("🔥 Focus Engine activated! Welcome.", "success");
+            break;
         case "stats":
             renderStats(data);
             break;
@@ -211,6 +219,51 @@ function handleMessage(data) {
     }
 }
 
+// ── First-run & data-loading helpers ──────────────────────
+
+function handleFirstRunStatus(data) {
+    const overlay = document.getElementById("first-run-overlay");
+    if (data.is_first_run) {
+        // Show setup overlay & populate security questions
+        if (overlay) overlay.classList.remove("hidden");
+        const select = document.getElementById("setup-security-question");
+        if (select && data.questions) {
+            select.innerHTML = "";
+            data.questions.forEach((q, i) => {
+                const opt = document.createElement("option");
+                opt.value = i;
+                opt.textContent = q;
+                select.appendChild(opt);
+            });
+        }
+    } else {
+        // Setup already done — hide overlay, load all dashboard data
+        hideFirstRunOverlay();
+        refreshAllData();
+    }
+}
+
+function hideFirstRunOverlay() {
+    const overlay = document.getElementById("first-run-overlay");
+    if (overlay) overlay.classList.add("hidden");
+}
+
+function refreshAllData() {
+    sendWS({ action: "get_stats", period: "day" });
+    sendWS({ action: "get_tokens" });
+    sendWS({ action: "get_focus_mode" });
+    sendWS({ action: "get_current_activity" });
+    sendWS({ action: "get_spotify" });
+    sendWS({ action: "get_streak" });
+    sendWS({ action: "get_top_apps" });
+    sendWS({ action: "get_web_stats" });
+    sendWS({ action: "get_recent_web" });
+    sendWS({ action: "get_category_totals" });
+    sendWS({ action: "get_blocked_apps" });
+    sendWS({ action: "get_settings" });
+    sendWS({ action: "get_engine_status" });
+}
+
 function handleAuthResult(data) {
     if (data.valid) {
         if (currentModalCallback) {
@@ -268,7 +321,7 @@ setInterval(() => {
 // ═══════════════════════════════════════════════════════════
 
 function formatTime(seconds) {
-    if (!seconds || seconds < 0) return "0s";
+    if (!seconds || seconds <= 0) return "0m";
     if (seconds < 60) return `${Math.round(seconds)}s`;
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
@@ -299,9 +352,13 @@ function animateNumber(elementId, target) {
 function animateTimeValue(elementId, totalSeconds) {
     const el = document.getElementById(elementId);
     if (!el) return;
-    el.textContent = formatTime(totalSeconds);
-    // Remove shimmer on first real data
-    el.classList.remove("shimmer-text");
+    const formatted = formatTime(totalSeconds);
+    el.textContent = formatted;
+    // Only remove the shimmer once we have non-zero data
+    // Zero values keep the shimmer to indicate "tracking, no data yet"
+    if (totalSeconds > 0) {
+        el.classList.remove("shimmer-text");
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -322,8 +379,20 @@ function renderStats(data) {
     animateNumber("stat-tokens", tokenBalance);
     animateNumber("stat-streak", streak);
 
+    // Cache stats so page refresh doesn't flash 0
+    try {
+        localStorage.setItem("_cached_stats", JSON.stringify({
+            studyTime, totalScreen, tokenBalance, streak, ts: Date.now()
+        }));
+    } catch (_) {}
+
     // Daily activity bar chart
     renderDailyActivityChart(data.hourly || []);
+
+    // Also render sub-sections if the stats response includes them
+    if (data.top_apps) renderTopApps(data.top_apps);
+    if (data.web_time) renderWebStats(data.web_time);
+    if (data.categories) renderCategoryDonut(data.categories);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1506,3 +1575,100 @@ function renderPeriodChart(data) {
         },
     });
 }
+
+// ═══════════════════════════════════════════════════════════
+// First-Run Setup
+// ═══════════════════════════════════════════════════════════
+
+function handleFirstRunStatus(data) {
+    if (data.is_first_run) {
+        // Populate the security question dropdown
+        const select = document.getElementById("setup-security-question");
+        if (select && data.questions) {
+            select.innerHTML = data.questions
+                .map((q, i) => `<option value="${i}">${q}</option>`)
+                .join("");
+        }
+        // Show the overlay
+        const overlay = document.getElementById("first-run-overlay");
+        if (overlay) overlay.classList.remove("hidden");
+    } else {
+        // Already configured — hide overlay and load data
+        hideFirstRunOverlay();
+        refreshAllData();
+    }
+}
+
+function hideFirstRunOverlay() {
+    const overlay = document.getElementById("first-run-overlay");
+    if (overlay) {
+        overlay.style.opacity = "0";
+        overlay.style.transition = "opacity 0.4s ease";
+        setTimeout(() => overlay.classList.add("hidden"), 400);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Initialisation
+// ═══════════════════════════════════════════════════════════
+
+document.addEventListener("DOMContentLoaded", () => {
+    // ── First-run form submission ──────────────────────────
+    const submitBtn = document.getElementById("btn-first-run-submit");
+    if (submitBtn) {
+        submitBtn.addEventListener("click", () => {
+            const password = document.getElementById("setup-password")?.value?.trim() || "";
+            const confirm  = document.getElementById("setup-password-confirm")?.value?.trim() || "";
+            const qIndex   = parseInt(document.getElementById("setup-security-question")?.value ?? "0");
+            const answer   = document.getElementById("setup-security-answer")?.value?.trim() || "";
+            const errorEl  = document.getElementById("first-run-error");
+
+            const showError = (msg) => {
+                if (errorEl) { errorEl.textContent = msg; errorEl.classList.remove("hidden"); }
+            };
+
+            if (password.length < 4) return showError("Password must be at least 4 characters.");
+            if (password !== confirm) return showError("Passwords do not match.");
+            if (!answer) return showError("Security answer cannot be empty.");
+
+            if (errorEl) errorEl.classList.add("hidden");
+            submitBtn.textContent = "Activating…";
+            submitBtn.disabled = true;
+
+            sendWS({
+                action: "first_run_setup",
+                password,
+                question_index: qIndex,
+                answer,
+            });
+
+            // Re-enable after 3s in case of error
+            setTimeout(() => {
+                submitBtn.textContent = "🚀 Activate Focus Engine";
+                submitBtn.disabled = false;
+            }, 3000);
+        });
+    }
+
+    // ── Allow Enter key to submit first-run form ───────────
+    ["setup-password", "setup-password-confirm", "setup-security-answer"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("keydown", e => {
+            if (e.key === "Enter") document.getElementById("btn-first-run-submit")?.click();
+        });
+    });
+
+    // ── Start WebSocket ────────────────────────────────────
+    connectWebSocket();
+
+    // ── Restore cached stats immediately to prevent 0-flash ──
+    try {
+        const cached = JSON.parse(localStorage.getItem("_cached_stats") || "null");
+        if (cached && Date.now() - cached.ts < 86400000) { // max 24h old
+            animateTimeValue("stat-study-time", cached.studyTime);
+            animateTimeValue("stat-screen-time", cached.totalScreen);
+            animateNumber("stat-tokens", cached.tokenBalance);
+            animateNumber("stat-streak", cached.streak);
+        }
+    } catch (_) {}
+});
