@@ -130,16 +130,7 @@ def main():
 
     from core.app_killer import AppKiller
     killer = AppKiller()
-
-    def run_app_killer():
-        while True:
-            try:
-                killer.hunt_and_kill()
-            except Exception:
-                pass
-            time.sleep(5)
-
-    threading.Thread(target=run_app_killer, daemon=True).start()
+    killer.start()  # Launches WMI process-start watcher + WinEvent foreground hook
 
     from core.tracker import ActivityTracker
     tracker = ActivityTracker()

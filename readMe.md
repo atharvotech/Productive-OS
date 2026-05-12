@@ -1,70 +1,223 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white"/>
+<img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?style=for-the-badge&logo=windows&logoColor=white"/>
 <img src="https://img.shields.io/badge/Python-3.8+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
+<img src="https://img.shields.io/badge/Version-3.6-blueviolet?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge"/>
-<img src="https://img.shields.io/github/stars/atharvotech/Productive-OS?style=for-the-badge&color=yellow"/>
+<img src="https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge"/>
 
 <br/><br/>
 
-# 🧠 Productive-OS v3.5 (Atharvotech™)
+# 🧠 Productive-OS v3.6
 ### *Your AI-Powered Study Partner — Not Just Another Website Blocker*
 
-**The only Windows productivity tool that locks down your entire system, rewards your focus with real points, and fights back when you try to cheat.**
+> **The only Windows productivity tool that locks down your entire system at the OS level, rewards your focus with real tokens, detects games dynamically, and fights back when you try to cheat.**
 
-[📥 Download](#-installation--setup) · [🖥️ Dashboard Preview](#-dashboard-preview) · [⭐ Star this Repo](https://github.com/atharvotech/Productive-OS) · [🐛 Report a Bug](https://github.com/atharvotech/Productive-OS/issues)
+<br/>
+
+[📥 Installation](#-installation--setup) · [🗺️ Architecture](#-system-architecture) · [✨ Features](#-feature-breakdown) · [🔧 Troubleshooting](#%EF%B8%8F-troubleshooting--faq) · [🗺️ Roadmap](#%EF%B8%8F-roadmap)
 
 </div>
 
 ---
 
+## 📋 Table of Contents
+
+1. [Why Productive-OS Is Different](#-why-productive-os-is-different)
+2. [What's New in v3.6](#-whats-new-in-v36)
+3. [Feature Breakdown](#-feature-breakdown)
+4. [System Architecture](#-system-architecture)
+5. [Tech Stack](#-tech-stack)
+6. [Installation & Setup](#-installation--setup)
+7. [Project File Structure](#-project-file-structure)
+8. [Engine Lifecycle](#-engine-lifecycle)
+9. [Dashboard Preview](#%EF%B8%8F-dashboard-preview)
+10. [Troubleshooting & FAQ](#%EF%B8%8F-troubleshooting--faq)
+11. [Roadmap](#%EF%B8%8F-roadmap)
+12. [Disclaimer](#%EF%B8%8F-disclaimer)
+
+---
+
 ## 🤔 Why Productive-OS Is Different
 
-Most focus apps are easy to beat. You close the browser extension, switch to a different browser, or just uninstall the app. Done — distraction wins.
+Most focus apps are trivially easy to bypass. Close the extension. Switch to a different browser. Uninstall the app. Done — distraction wins.
 
-**SATHI does not let that happen.**
+**Productive-OS does not let that happen.**
 
-Instead of playing nice, it digs deep into your Windows system. It watches every active window, intercepts DNS requests before they reach your browser, scans for background games and kills them, and even tracks what you are listening to on Spotify. It locks itself behind an admin password and a watchdog process that restarts it automatically, even if you force-kill it.
+Instead of playing nice, it digs deep into your Windows system. It:
+- 👁️ Watches every active window via **Win32 API hooks**
+- 🌐 Intercepts DNS requests **before they reach your browser**
+- 🎮 Dynamically scans for games using **WMI process-start events** and kills them instantly
+- 🎵 Tracks what you're listening to on Spotify, even in the background
+- 🔒 Locks itself behind an admin password with a **self-healing watchdog** process
 
-And when you actually study? It **rewards** you — with a token system that unlocks real game time. Focus stops being a punishment. It becomes a game you can win.
+When you actually study? It **rewards** you — with a token economy that unlocks real game time. Focus stops being a punishment. It becomes a game you can win.
+
+---
+
+## 🆕 What's New in v3.6
+
+### Game Detection Engine — Complete Rewrite (Event-Driven)
+The old polling-based game detection has been replaced with a zero-overhead, event-driven architecture:
+
+- **WMI `Win32_ProcessStartTrace`** — the OS itself notifies the engine the instant any `.exe` launches. No more polling every 5 seconds; reaction time is now **< 100 ms**.
+- **`SetWinEventHook EVENT_SYSTEM_FOREGROUND`** — a second hook kills a game window the instant it becomes the foreground window, before the user can interact.
+- **No CPU/GPU heuristics** — safe for heavy creative software like DaVinci Resolve, Blender, and After Effects. Game detection is based purely on process identity.
+
+### Google Play Games for PC — Now Fully Blocked
+Scans `%LOCALAPPDATA%\Google\Play Games\` at startup, indexes every game executable, and terminates all matching processes in Study Mode. Games launched via the Google Play Games launcher (including Free Fire MAX) are now caught.
+
+### Android Emulators — Detected & Blocked
+BlueStacks, LDPlayer, NoxPlayer, MuMu Player, MEmu, and GameLoop are explicitly catalogued as gaming launchers and terminated immediately in Study Mode.
+
+### Critical Bug Fix — Study Mode Never Killed Games
+A logic error (`focus_mode == "on"` instead of `focus_mode in ("study", "on")`) meant the game killer was silently a no-op in Study Mode. **Fixed.**
+
+### Single-Instance Mutex
+A system-wide Windows mutex (`CreateMutexW`) prevents duplicate engine instances from running concurrently, eliminating double-counted screen time.
+
+### UI & Branding Fixes
+- Fixed stale `localhost:8080` references in `ui.py` and `tracker.py` → now correctly `8123`
+- Added Atharvotech™ developer disclaimer to the Settings page
+- Expanded `GAMING_KEYWORDS` in `tracker.py` from 9 entries to 34+ for accurate category classification
 
 ---
 
 ## ✨ Feature Breakdown
 
-### 🆕 What's New in v3.5
-- **Invisible Background Engine:** Productive-OS now runs entirely in the background as a headless Windows service. No more persistent console windows cluttering your taskbar.
-- **Flawless Tracking & Sync:** Fixed a critical bug where screen time and Spotify listening metrics would occasionally zero-out. Background music listening is now accurately aggregated alongside foreground activity, and web tracking strictly filters by the current day.
-- **Lightning Fast Dashboard:** Real-time data flushing has been optimized (from 30s down to 10s intervals), and the dashboard now implements local caching. This means instant UI updates and zero loading flashes when you open your stats.
-- **Graceful & Forceful Termination:** The engine now guarantees clean process termination when disabled from the dashboard. No more ghost processes lingering in your system memory.
-
 ### 🔒 System-Level Lockdown
-SATHI does not rely on browser extensions alone. It operates at the OS level — modifying DNS settings, writing to the Windows Registry, and using process-level controls to enforce your session. This means it works across **all browsers, all apps, and all windows** at once.
+Operates at the OS level — modifying DNS settings, writing to the Windows Registry, and using process-level controls. Works across **all browsers, all apps, and all windows** simultaneously.
 
-### 🌐 Family-Safe DNS Filtering (Auto-Setup)
-SATHI automatically configures your system DNS to block adult content and harmful websites the moment a focus session starts. No manual configuration needed. It uses the same approach as enterprise-grade parental control systems.
+### 🎮 Dynamic Game Detection & Killing
+| Detection Method | Description |
+|-----------------|-------------|
+| WMI Process Start Trace | Fires on every new `.exe` launch — near-zero idle CPU |
+| WinEvent Foreground Hook | Kills game window the instant it gains focus |
+| Steam Library Scanner | Indexes all `.exe` files in `steamapps/common` |
+| Google Play Games Scanner | Indexes `%LOCALAPPDATA%\Google\Play Games\` |
+| Regex Pattern Matching | 35+ patterns covering major titles |
+| Exe Publisher Metadata | Reads `CompanyName` from PE version resource |
+| Emulator Detection | BlueStacks, LDPlayer, NoxPlayer, MuMu, MEmu, GameLoop |
+| User Blacklist | Custom executables added via the dashboard |
 
-### 🕵️ Full Window & App Monitoring
-Every application you open is logged. Idle desktop time is tracked. If a game is detected running silently in the background during a focus session, it is force-closed immediately.
+### 🌐 Family-Safe DNS Filtering
+Automatically configures system DNS to block adult content and harmful sites the moment a focus session starts. Uses enterprise-grade approach (Cloudflare Family DNS 1.1.1.3).
 
-### 🎵 Spotify Listening Activity Tracking
-SATHI reads your Spotify activity in real time. Patterns like constant track-skipping or switching playlists are captured and added to your session report — giving you an honest view of how focused you actually were.
+### 📊 Real-Time Analytics Dashboard
+A live dashboard built with Chart.js, featuring:
+- Hourly heatmap of screen time
+- Category breakdown (Study / Gaming / Social / Entertainment)
+- Top applications bar chart
+- Spotify listening timeline
+- Web activity table (today's data only, strictly date-filtered)
+- Token balance and transaction history
 
-### 📊 Screen Time Charts & Analytics Dashboard
-A beautiful live dashboard built with Chart.js shows your daily and weekly screen time, productive vs. distracted time, and Spotify activity — all visualized inside a sleek glassmorphism-styled UI.
-
-### 🏆 Token Economy — Earn Game Time by Studying
-This is the heart of SATHI. Every focused minute earns **tokens**. Tokens unlock real game time after your session ends. Tokens are stored in a tamper-protected SQLite database, so there is no way to fake your way to a reward.
+### 🏆 Token Economy
+Every focused minute earns tokens stored in a tamper-protected SQLite database.
 
 | Action | Tokens |
 |--------|--------|
-| Complete a 25-min Pomodoro session | +10 tokens |
-| Complete 1 hour of deep work | +30 tokens |
-| Unlock 30 min of game time | −15 tokens |
-| Attempted bypass detected | −50 tokens (penalty) |
+| 1 hour of study time | +30 tokens |
+| 1 hour of gaming | −15 tokens |
+| Unlock 30 min game time | −15 tokens |
+| Bypass attempt detected | −50 tokens |
 
 ### 🔐 Admin Password & Self-Healing Watchdog
-You set a master password during first-run setup. If anyone — including you — tries to stop the engine without the password, a background watchdog process automatically brings it back to life. Forgot your password? The security question recovery flow has you covered.
+A master password set during first-run setup. A background watchdog task (Windows Task Scheduler) automatically restarts the engine if it is force-killed. Security question recovery is built in.
+
+### 🎵 Spotify Background Tracking
+Tracks listening time even when Spotify is minimized or not the focused window, using `EnumWindows` to find Spotify's window title in the background.
+
+### 🏫 Study Mode — Full Enforcement
+- Force-maximizes all windows (minimizing is blocked via WinEvent hooks)
+- Disables Windows Snap Assist via Registry
+- Locks `chrome://extensions` and `edge://extensions` via Group Policy registry keys (prevents disabling the monitoring extension)
+- DNS-blocks distracting sites
+- Terminates all detected games instantly
+
+---
+
+## 🗺️ System Architecture
+
+### High-Level Component Flow
+
+```mermaid
+flowchart TD
+    A([🚀 main.py\nMaster Orchestrator]) --> B[🔒 Auth Manager\nFirst-run password setup]
+    A --> C[🐕 Watchdog\nTask Scheduler guardian]
+    A --> D[🌐 DNS Blocker\nCloudflare Family DNS]
+    A --> E[🎮 App Killer\nEvent-driven game termination]
+    A --> F[📊 Activity Tracker\nWindow polling every 2s]
+    A --> G[🔌 WebSocket API\nPort 8765]
+    A --> H[🖥️ HTTP Server\nPort 8123]
+    A --> I[🪟 pywebview Window\nNative UI]
+
+    E --> E1[WMI ProcessStartTrace\nfires on new .exe launch]
+    E --> E2[WinEvent Foreground Hook\nkills game on focus]
+    E --> E3[Startup Scan\ncatch already-running games]
+
+    F --> F1[(SQLite DB\nproductive_os.db)]
+    F --> F2[🎵 Spotify Tracker\nBackground title detection]
+    F --> F3[📝 Activity Classifier\n34+ gaming keywords]
+
+    G --> J[🌍 Chrome Extension\nManifest V3]
+    J --> J1[Web Time Logging]
+    J --> J2[URL Blocking\nStudy / Productive mode]
+    J --> J3[Productive Mode Timers\nReddit 10min, YouTube 15min]
+
+    H --> K[📈 Dashboard\nindex.html + app.js]
+    K --> G
+```
+
+### Game Detection Decision Tree
+
+```mermaid
+flowchart TD
+    START([New Process Detected]) --> WL{In whitelist?\nStudy apps / System}
+    WL -- Yes --> ALLOW([✅ Allow])
+    WL -- No --> SYS{From system path?\nc:\\windows\\...}
+    SYS -- Yes --> ALLOW
+    SYS -- No --> UBL{In user\nblacklist?}
+    UBL -- Yes --> KILL
+    UBL -- No --> EMU{Android emulator\nor game launcher?}
+    EMU -- Yes --> KILL
+    EMU -- No --> GPG{In Google Play\nGames index?}
+    GPG -- Yes --> KILL
+    GPG -- No --> STM{In Steam library\nscan index?}
+    STM -- Yes --> KILL
+    STM -- No --> REG{Matches regex\npattern? 35+ rules}
+    REG -- Yes --> KILL
+    REG -- No --> PUB{Publisher metadata\nmatches known studio?}
+    PUB -- Yes --> KILL
+    PUB -- No --> ALLOW
+
+    KILL([💀 Kill Process]) --> MODE{Focus mode\nactive?}
+    MODE -- study / on --> TERMINATE([Terminate + log])
+    MODE -- off --> TRACK([Track gaming minutes\nAuto-focus if threshold exceeded])
+```
+
+### Study Mode Enforcement Chain
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant WE as WinEvent Hook
+    participant AK as App Killer
+    participant TR as Tracker
+    participant DB as SQLite
+
+    U->>WE: Opens game / switches window
+    WE->>AK: EVENT_SYSTEM_FOREGROUND fired
+    AK->>DB: get focus_mode
+    DB-->>AK: "study"
+    AK->>AK: is_game_process() → True
+    AK->>U: proc.terminate() / proc.kill()
+    AK->>DB: log_killed_process()
+    TR->>DB: flush accumulated time (every 10s)
+    DB-->>TR: updated stats
+    TR->>WE: on_flush() callback
+    WE-->>U: Dashboard updates via WebSocket push
+```
 
 ---
 
@@ -72,142 +225,274 @@ You set a master password during first-run setup. If anyone — including you �
 
 | Layer | Technology |
 |-------|------------|
-| **Backend Core** | Python — `psutil`, `winreg`, `ctypes`, `threading`, `msvcrt` |
-| **Data & Auth** | SQLite3, bcrypt |
-| **Real-Time API** | WebSockets (Port 8765) + HTTP Server (Port 8123) |
-| **Frontend Dashboard** | HTML5, CSS3 (Glassmorphism), Vanilla JS, Chart.js, `pywebview` |
-| **Browser Integration** | Chrome Extension — Manifest V3 + Background Service Workers |
+| **Backend Core** | Python 3.8+ — `psutil`, `winreg`, `ctypes`, `threading`, `wmi` |
+| **Process Events** | WMI `Win32_ProcessStartTrace` + `SetWinEventHook` |
+| **Data & Auth** | SQLite3, `bcrypt` |
+| **Real-Time API** | `websockets` (Port 8765) + stdlib HTTP Server (Port 8123) |
+| **Frontend Dashboard** | HTML5, Vanilla CSS (Glassmorphism), Vanilla JS, Chart.js 4.x |
+| **Native Window** | `pywebview` (wraps dashboard in a native OS window) |
+| **Browser Integration** | Chrome Extension — Manifest V3 + Background Service Worker |
+| **Persistence** | Windows Task Scheduler (`schtasks`) for watchdog auto-restart |
+| **Build** | PyInstaller (`build.py`) — single `.exe` with `--uac-admin` |
 
 ---
 
 ## 🚀 Installation & Setup
 
-Total setup time: approximately 5 minutes.
+> ⏱️ **Total setup time: ~5 minutes**
 
-### Step 1 — Clone the Repository & Install Dependencies
+### Step 1 — Clone & Install Dependencies
 
 ```bash
-git clone https://github.com/yourusername/Focus-Engine-Pro.git
-cd Focus-Engine-Pro
+git clone https://github.com/atharvotech/Productive-OS.git
+cd Productive-OS
 pip install -r requirements.txt
 ```
 
+> `requirements.txt` installs: `psutil`, `websockets`, `bcrypt`, `pywin32`, `pywebview`, `pyinstaller`, `wmi`
+
 ### Step 2 — Install the Chrome Extension
 
-Open Chrome or Brave and navigate to `chrome://extensions/`. Enable **Developer Mode** using the toggle in the top-right corner, then click **Load unpacked** and select the `extension/` folder from this repository. This connects your browser's tab activity directly to SATHI.
+1. Open Chrome or Brave → navigate to `chrome://extensions/`
+2. Enable **Developer Mode** (toggle, top-right)
+3. Click **Load unpacked** → select the `extension/` folder
 
-### Step 3 — Launch the Engine as Administrator
+This connects your browser's real-time tab activity to the engine.
 
-> ⚠️ **Critical step.** DNS modification and Windows Registry access both require elevated privileges.
+### Step 3 — Launch as Administrator
 
-Right-click your terminal or command prompt, select **Run as Administrator**, then execute:
+> ⚠️ **Required.** DNS and Registry modifications need elevated privileges.
 
 ```bash
+# Right-click terminal → "Run as Administrator", then:
 python main.py
 ```
 
-On your very first run, an interactive prompt will guide you through creating your **Admin Password** and setting a **Security Recovery Question**.
+On first run, the dashboard will guide you through creating your **Admin Password** and **Security Recovery Question**.
 
 ### Step 4 — Open Your Dashboard
 
-If you ran it normally, a native UI window will open automatically. If you run it in the background or open your browser manually, navigate to:
+The native pywebview window opens automatically. To open manually in a browser:
+
 ```
 http://localhost:8123
 ```
 
-Your focus engine is live.
+Your focus engine is live. 🔥
+
+### Step 5 — (Optional) Build a Standalone .exe
+
+```bash
+python build.py
+```
+
+Produces a single `Productive-OS.exe` in `dist/` with UAC admin elevation built in.
 
 ---
 
-## 📁 Project Architecture
+## 📁 Project File Structure
 
 ```
-Focus-Engine-Pro/
+Productive-OS/
 │
-├── core/                   # Python Backend
-│   ├── auth.py             # Admin password & bcrypt hashing
-│   ├── db.py               # SQLite telemetry & token ledger
-│   ├── blocker.py          # DNS & Registry-level site blocking
-│   ├── app_killer.py       # Background game detection & termination
-│   ├── tracker.py          # Window activity & idle time logging
-│   ├── api.py              # WebSocket + HTTP API endpoints
-│   └── watchdog.py         # Self-healing process guardian
+├── core/                        # Python Backend Engine
+│   ├── api_server.py            # WebSocket (8765) + HTTP (8123) server
+│   ├── app_killer.py            # Event-driven game detection & termination
+│   ├── auth.py                  # Admin password + bcrypt + recovery Q&A
+│   ├── database.py              # SQLite telemetry, token ledger, web time
+│   ├── dns_blocker.py           # Cloudflare Family DNS via netsh
+│   ├── tracker.py               # Window activity poller + Spotify tracker
+│   └── watchdog.py              # Task Scheduler self-healing guardian
 │
-├── dashboard/              # Web UI
-│   ├── index.html
-│   ├── style.css           # Glassmorphism design system
-│   └── charts.js           # Chart.js analytics rendering
+├── dashboard/                   # Web UI (served at localhost:8123)
+│   ├── index.html               # Single-page app shell
+│   ├── style.css                # Dark glassmorphism design system
+│   └── app.js                   # WebSocket client + Chart.js rendering
 │
-├── extension/              # Chrome Extension (Manifest V3)
+├── extension/                   # Chrome Extension (Manifest V3)
 │   ├── manifest.json
-│   └── background.js       # Service worker for real-time tab tracking
+│   ├── background.js            # Service worker: tracking + URL blocking
+│   └── content.js               # Media-playing state detection
 │
-├── requirements.txt
-└── main.py                 # Master Orchestrator — entry point
+├── main.py                      # Master Orchestrator — entry point
+├── ui.py                        # pywebview native window launcher
+├── build.py                     # PyInstaller build script
+└── requirements.txt
+```
+
+---
+
+## ⚙️ Engine Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Starting: python main.py
+    Starting --> AdminCheck: Check if running as Administrator
+    AdminCheck --> Elevating: Not admin → ShellExecuteW runas
+    AdminCheck --> Initializing: Admin confirmed
+    Elevating --> Initializing
+    Initializing --> Running: DB init, Auth, Watchdog, DNS, App Killer, Tracker, API
+    
+    Running --> StudyMode: User enables Study Mode
+    Running --> ProductiveMode: User enables Productive Mode
+    Running --> Running: Mode = OFF (tracking only)
+    
+    StudyMode --> Running: Mode turned OFF
+    ProductiveMode --> Running: Mode turned OFF
+    
+    Running --> Shutdown: Disable Engine (Admin password required)
+    StudyMode --> Shutdown: Disable Engine (Admin password required)
+    Shutdown --> [*]: os._exit(0) — all threads terminated
 ```
 
 ---
 
 ## 🖥️ Dashboard Preview
 
-> *(Screenshots coming soon — contributions welcome!)*
+The dashboard features:
+- **Overview** — live activity feed, stat cards (study time, screen time, tokens, streak), daily activity chart, category donut
+- **Screen Time** — top applications bar chart, hourly heatmap, detailed usage table
+- **Web Activity** — per-domain time chart, web category breakdown, recent URLs (today only)
+- **Spotify** — now-playing equalizer animation, listening time, recent tracks
+- **Tokens** — balance, history chart, transaction log
+- **Settings** — mode toggle, DNS blocking, blocked/whitelisted apps, YouTube channel whitelist, token rates, password management, engine disable
 
-The dashboard features a live activity feed, token balance widget, interactive screen time charts, Spotify listening graphs, and one-click session controls — all in a dark glassmorphism interface that is designed to feel motivating, not clinical.
+All rendered in a **dark glassmorphism** UI with micro-animations, smooth gradients, and real-time WebSocket updates.
 
 ---
 
 ## 🛠️ Troubleshooting & FAQ
 
-**I forgot my Admin Password. How do I stop the engine?**
-On the web dashboard or terminal, select **"Forgot Password"**. You will be asked the Security Question you set up during first-run setup. A correct answer allows you to reset the password and regain full control.
+<details>
+<summary><strong>❓ I forgot my Admin Password</strong></summary>
 
-**Incognito Mode is not being blocked.**
-Ensure `main.py` was launched with Administrator privileges. SATHI writes to the `HKLM` Windows Registry hive, which is inaccessible to standard user processes and causes silent failures without elevation.
+On the dashboard → Settings → Security & Engine Control → click **"Forgot Password?"**. Answer the security question you set during first-run to reset your password.
 
-**The dashboard is not loading.**
-Check your terminal to confirm that ports `8123` (HTTP) and `8765` (WebSocket) are free. On Windows, run `netstat -ano | findstr :8123` to identify any conflicting process.
+</details>
 
-**A game is slipping through and not being detected.**
-SATHI uses process name matching and heuristic scanning. If a specific game is not being caught, please open a GitHub issue with the executable name and we will add it to the detection list.
+<details>
+<summary><strong>❓ Incognito Mode is not being blocked</strong></summary>
+
+Ensure `main.py` was launched with **Administrator privileges**. The engine writes to `HKLM` Registry hive which requires elevation. Run in an admin terminal.
+
+</details>
+
+<details>
+<summary><strong>❓ The dashboard is not loading at localhost:8123</strong></summary>
+
+Check that ports `8123` (HTTP) and `8765` (WebSocket) are free:
+
+```powershell
+netstat -ano | findstr :8123
+netstat -ano | findstr :8765
+```
+
+Kill any conflicting process, then restart `main.py`.
+
+</details>
+
+<details>
+<summary><strong>❓ A game is not being detected or killed</strong></summary>
+
+**Option A:** Add the `.exe` name manually in Dashboard → Settings → Blocked Applications.
+
+**Option B:** Open a GitHub issue with the executable name. The `GAME_EXE_PATTERNS` list is updated regularly.
+
+**Common cause:** The game's `.exe` name doesn't match any known pattern AND it's not in your Steam / Google Play Games library scan. The explicit blacklist in settings always works as a guaranteed override.
+
+</details>
+
+<details>
+<summary><strong>❓ DaVinci Resolve / Blender is being killed</strong></summary>
+
+These are explicitly in the `STUDY_APPS` whitelist in `app_killer.py` and will never be killed. If you are experiencing this, please open an issue — it is a bug.
+
+</details>
+
+<details>
+<summary><strong>❓ Screen time is showing more than actual usage</strong></summary>
+
+Most likely caused by a ghost process from a previous session that wasn't fully terminated. The v3.6 singleton mutex prevents this — only one engine instance can run at a time. If you see stale data, it is from an earlier session recorded in SQLite for today's date.
+
+</details>
+
+<details>
+<summary><strong>❓ WMI process watcher not starting</strong></summary>
+
+Install the `wmi` package:
+
+```bash
+pip install wmi
+```
+
+The engine gracefully falls back to a lightweight 3-second polling loop (tracking only new PIDs, not rescanning all processes) if WMI is unavailable.
+
+</details>
 
 ---
 
 ## 🗺️ Roadmap
 
-- [x] Process tracking & heuristic game killing
-- [x] SQLite telemetry & token economy
-- [x] Custom Chrome Extension integration
-- [x] Admin password & watchdog self-protection
-- [x] Family-safe DNS auto-configuration
-- [x] Package the entire Python backend into a single `.exe` using PyInstaller (`build.py`)
-- [ ] Strict **Pomodoro Mode** with enforced break timers
-- [ ] Mobile dashboard companion for viewing stats from your phone
-- [ ] Weekly focus reports sent to your email
+### ✅ Completed
+- [x] Win32 window activity tracking + idle detection
+- [x] SQLite telemetry database + token economy
+- [x] Chrome Extension (Manifest V3) with real-time tab tracking
+- [x] Admin password, bcrypt hashing, security question recovery
+- [x] Family-safe DNS auto-configuration (Cloudflare 1.1.1.3)
+- [x] Self-healing Watchdog via Windows Task Scheduler
+- [x] PyInstaller single-exe build pipeline
+- [x] Glassmorphism real-time analytics dashboard (Chart.js)
+- [x] Spotify background listening tracker
+- [x] Study Mode: window maximization enforcement + Snap Assist lock
+- [x] Extension page lockdown (`chrome://extensions` via Group Policy registry)
+- [x] **v3.5**: Background headless engine, 10s flush, Spotify fix, web date filter
+- [x] **v3.6**: Event-driven WMI game detection, Google Play Games, emulator blocking, critical bug fixes, singleton mutex
+
+### 🔜 Upcoming
+- [ ] **Pomodoro Mode** — enforced 25/5 break timers with mandatory lock screen
+- [ ] **Mobile Companion App** — view live stats from your phone
+- [ ] **Weekly Focus Reports** — PDF summary emailed to you
+- [ ] **AI Study Insights** — pattern analysis to suggest optimal focus windows
+- [ ] **Cloud Sync** — backup telemetry and settings across devices
 
 ---
 
 ## 🤝 Contributing
 
-All contributions are welcome — whether you are fixing a bug, improving the dashboard, adding games to the detection list, or writing documentation. To contribute, fork the repository, create a feature branch (`git checkout -b feature/YourFeature`), commit your changes, and open a Pull Request.
+Contributions are welcome — bug fixes, new game patterns, dashboard improvements, or documentation. To contribute:
 
----
+```bash
+git fork https://github.com/atharvotech/Productive-OS
+git checkout -b feature/your-feature-name
+# make your changes
+git commit -m "feat: describe your change"
+git push origin feature/your-feature-name
+# open a Pull Request
+```
 
-## ⭐ Support the Project
-
-If SATHI helped you study better, focus longer, or simply stopped you from opening Steam at midnight — please give this repository a **star**. It costs nothing and helps more students find the project.
-
-[![Star this repo](https://img.shields.io/github/stars/yourusername/Focus-Engine-Pro?style=social)](https://github.com/yourusername/Focus-Engine-Pro)
+> ⚠️ This is currently a **personal project**. External redistribution or commercial use without explicit written permission from Atharvotech™ is not permitted.
 
 ---
 
 ## ⚠️ Disclaimer
 
-Productive-OS makes real, active changes to your Windows OS — including modifying `HKLM` Registry keys, changing DNS settings via `netsh`, and forcefully terminating processes. **Use at your own risk.** The developers are not responsible for system lockouts or data loss caused by manually tampering with the locked SQLite database while the engine is running. Always use the official admin password flow to stop or modify an active session.
+Productive-OS makes real, active changes to your Windows OS — including modifying `HKLM` Registry keys, changing system DNS via `netsh`, forcefully terminating processes, and installing Windows Task Scheduler tasks. **Use at your own risk.**
+
+The developers are not responsible for system lockouts or data loss caused by manually tampering with the locked SQLite database while the engine is running. Always use the official admin password flow to stop or modify an active session.
 
 ---
 
 <div align="center">
-<h2>Made with ❤️ in INDIA By <i>ATHARVOTECH™—THE WORLD OF INFINTE CREATIVITY</i></h2>
-© 2026 Atharvotech™(Atharv Shukla). All Rights Reserved. This is a personal project and is currently closed for external distribution or modification.
+
+<h2>Made with ❤️ in INDIA By <i>ATHARVOTECH™ — THE WORLD OF INFINITE CREATIVITY</i></h2>
+
+© 2026 Atharvotech™ (Atharv Shukla). All Rights Reserved.  
+This is a personal project and is currently closed for external distribution or modification.
+
+<br/>
+
+<img src="https://img.shields.io/badge/Version-3.6-blueviolet?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/Built%20in-India-FF9933?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/Powered%20by-Python-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
 
 </div>

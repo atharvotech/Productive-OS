@@ -284,15 +284,27 @@ ENTERTAINMENT_KEYWORDS = [
 ]
 
 GAMING_KEYWORDS = [
-    "steam", "epic games", "riot", "valorant", "fortnite",
-    "gta", "minecraft", "roblox", "league of legends",
+    # Launchers
+    "steam", "epic games", "riot", "battle.net", "gameloop",
+    "bluestacks", "ldplayer", "nox player", "memu", "google play games",
+    # Titles (window title detection)
+    "valorant", "fortnite", "gta", "minecraft", "roblox",
+    "league of legends", "dota", "cs:go", "counter-strike",
+    "pubg", "apex legends", "overwatch", "call of duty",
+    "warzone", "rocket league", "rainbow six", "destiny",
+    "warframe", "rust", "among us", "fall guys",
+    "genshin impact", "honkai", "elden ring", "dark souls",
+    "cyberpunk", "witcher", "battlefield", "fifa", "ea fc",
+    "nba 2k", "civilization", "free fire", "freefire",
+    "world of warcraft", "diablo", "hearthstone", "starcraft",
+    "clash of clans", "clash royale", "path of exile", "terraria",
 ]
 
 SPOTIFY_EXE = "spotify.exe"
 
 # Titles that should NEVER be classified as study (our own dashboard, etc.)
 SELF_DASHBOARD_KEYWORDS = [
-    "focus engine", "localhost:8080", "127.0.0.1:8080",
+    "focus engine", "localhost:8123", "127.0.0.1:8123",
     "productive-os", "beproductive",
 ]
 

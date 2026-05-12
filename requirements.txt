@@ -4,3 +4,4 @@ bcrypt>=4.0.0
 pywin32>=306
 pywebview>=4.0
 pyinstaller>=6.0
+wmi>=1.5.1
