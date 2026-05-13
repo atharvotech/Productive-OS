@@ -79,7 +79,8 @@ OR IMPLIED. TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW:
 You may NOT:
 
   (a) Copy, redistribute, sublicense, sell, rent, or lease this software
-      or any portion thereof to any third party.
+      or any portion thereof to any third party, in whole or in part,
+      whether in source, compiled, or installer form.
   (b) Reverse-engineer, decompile, disassemble, or attempt to derive the
       source code of the compiled executable, except where expressly
       permitted by applicable law.
@@ -89,6 +90,17 @@ You may NOT:
       commercial entity without prior written consent from Atharvotech™.
   (e) Attempt to bypass, circumvent, or disable the enforcement mechanisms
       of this software using any automated tool, script, or manual method.
+  (f) Mirror, archive, fork, or create derivative works based on this
+      software or its source code without the express written permission
+      of Atharvotech™, regardless of whether the source code is publicly
+      accessible at the time of copying.
+  (g) Share, upload, host, or transmit copies of this software — whether
+      the compiled executable, installer, or source files — on any
+      platform, website, peer-to-peer network, cloud storage service,
+      messaging platform, or physical media, without prior written
+      authorisation from Atharvotech™.
+  (h) Accept payment, barter, or any other form of consideration in
+      exchange for providing access to, or a copy of, this software.
 
 ──────────────────────────────────────────────────
 5. INTELLECTUAL PROPERTY
@@ -98,6 +110,12 @@ of Productive-OS are the exclusive intellectual property of
 Atharvotech™ (Avni Shukla & Atharv Shukla). All rights are reserved.
 Nothing in this Agreement transfers any ownership or intellectual property
 rights to you.
+
+The fact that any portion of this software's source code is or has been
+publicly accessible (e.g., on GitHub) does NOT constitute a waiver of
+copyright, a grant of licence to reproduce, or permission to redistribute.
+Public visibility of source code is for transparency and educational
+purposes only. All proprietary rights remain exclusively with Atharvotech™.
 
 ──────────────────────────────────────────────────
 6. PRIVACY & DATA COLLECTION
@@ -135,6 +153,53 @@ available at:
 By proceeding with installation, you confirm that you have had the
 opportunity to read the full Terms and that your acceptance below
 constitutes a binding agreement.
+
+──────────────────────────────────────────────────
+10. ATHARVOTECH'S RIGHTS TO COMMERCIALISE & CLOSE SOURCE
+──────────────────────────────────────────────────
+Atharvotech™ EXPRESSLY RESERVES the following rights, which may be
+exercised at any time, at its sole discretion and without prior notice
+to existing users:
+
+  (a) RIGHT TO CLOSE SOURCE
+      Atharvotech™ reserves the right to permanently or temporarily
+      remove this software's source code from any public repository
+      (including but not limited to GitHub) and to designate the software
+      as fully proprietary and closed-source. Any source code obtained
+      prior to such a declaration remains subject to all restrictions
+      in this Agreement and may not be further distributed, published,
+      or used as the basis of any derivative work.
+
+  (b) RIGHT TO COMMERCIALISE
+      Atharvotech™ reserves the right to offer Productive-OS, or any
+      future version thereof, as a paid commercial product at any time.
+      Such commercialisation may include, but is not limited to:
+        • Charging a one-time purchase fee for the software.
+        • Offering subscription-based access tiers.
+        • Licensing the software to institutions, schools, or enterprises.
+        • Bundling it with other commercial products or services.
+      The exercise of this right does not entitle any prior user to
+      continued free access to future versions.
+
+  (c) PROHIBITION ON UNAUTHORISED COMMERCIAL ACTIVITY
+      No third party may sell, resell, rent, sublicense, bundle, or
+      otherwise profit from Productive-OS or any derivative work without
+      an explicit, signed commercial agreement with Atharvotech™.
+      Any such unauthorised commercial activity constitutes both a
+      breach of this Agreement and an infringement of Atharvotech™'s
+      intellectual property rights, and may be subject to legal action.
+
+  (d) PRIOR COPIES NOT EXEMPT
+      Copies of the software or its source code obtained during any
+      period when it was freely available are NOT exempt from this
+      Agreement. The restrictions on redistribution, resale, and
+      derivative works apply retroactively to all copies ever obtained,
+      regardless of the licence conditions at the time of download.
+
+  (e) NO GRANDFATHER CLAUSE
+      Users who obtained the software at no cost are not granted any
+      perpetual free licence. Atharvotech™ may require paid licensing
+      for continued use of future versions at any time.
 
 ──────────────────────────────────────────────────
 © 2026 Atharvotech™
