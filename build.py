@@ -192,7 +192,7 @@ def _generate_iss(exe_path: str):
         ; ── License ──────────────────────────────────────────────────────
         ; LicenseFile forces an 'I Accept / I Do Not Accept' page.
         ; The user CANNOT click Next until they select 'I Accept'.
-        LicenseFile={os.path.join(BASE_DIR, 'license.txt')}
+        LicenseFile={os.path.join(BASE_DIR, 'EULA.txt')}
         DisableProgramGroupPage=no
         AllowCancelDuringInstall=yes
         ShowLanguageDialog=no

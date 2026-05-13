@@ -16,7 +16,7 @@ core/data.db-wal
 # Security & Config
 core/admin_config.json
 *.json.lock
-# license.txt is intentionally tracked (needed by build pipeline)
+# EULA.txt is intentionally tracked (needed by build pipeline)
 
 # project logs & debug tools
 
