@@ -51,3 +51,10 @@ dist/
 build/
 *.exe
 *.msi
+
+# Build pipeline artifacts
+installer/
+_build_src/
+dev_setup.iss
+prod_setup.iss
+*.spec

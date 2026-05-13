@@ -1,127 +1,291 @@
 """
-Productive-OS — PyInstaller Build Script
+Productive-OS — Local Development Builder
 ==========================================
-
-Run this script ONCE manually to produce dist/Productive-OS.exe:
+Builds a DEV-only standalone installer for local testing.
 
     python build.py
 
-Requirements (install first if not already):
-    pip install pyinstaller pywebview
+Pipeline:
+  1. Validates environment (PyInstaller, pywebview, Inno Setup)
+  2. Runs PyInstaller → dist/Productive-OS-dev.exe
+  3. Generates dev_setup.iss dynamically
+  4. Compiles via ISCC.exe → installer/Productive-OS-Dev-Setup.exe
 
-The resulting .exe will:
-  - Show a native Windows UAC prompt for admin rights (--uac-admin)
-  - Open the dashboard in a native application window (pywebview)
-  - Run the engine in the background when opened via Windows Search
-  - NOT show any black terminal/console window (--noconsole)
-
-Output:
-    dist/Productive-OS.exe   ← the standalone executable
-
-After building:
-  1. Run dist/Productive-OS.exe (accept UAC prompt)
-  2. On first run you'll see the Setup page in the dashboard window
-  3. Set your admin password to activate the engine
-  4. Pin to Start Menu or Taskbar for easy access
-  5. The engine will auto-start at login via Windows Task Scheduler
+Rules:
+  - Source: LOCAL FILES ONLY. No git pull, no remote fetching.
+  - Install path: {autopf}\\Atharvotech\\Productive-OS-Dev
+  - Runs taskkill on Productive-OS-dev.exe before extraction
+    (safe reinstall during iterative testing, NOT a full uninstall)
+  - Does NOT overwrite a production install.
 """
 
 import os
 import sys
 import subprocess
+import textwrap
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-ENTRY_POINT = os.path.join(BASE_DIR, "main.py")
+BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
+ENTRY_POINT   = os.path.join(BASE_DIR, "main.py")
 DASHBOARD_DIR = os.path.join(BASE_DIR, "dashboard")
 EXTENSION_DIR = os.path.join(BASE_DIR, "extension")
-CORE_DIR = os.path.join(BASE_DIR, "core")
+CORE_DIR      = os.path.join(BASE_DIR, "core")
+DIST_DIR      = os.path.join(BASE_DIR, "dist")
+BUILD_DIR     = os.path.join(BASE_DIR, "build")
+INSTALLER_DIR = os.path.join(BASE_DIR, "installer")
 
-APP_NAME = "Productive-OS"
+APP_NAME      = "Productive-OS (Dev Build)"
+EXE_NAME      = "Productive-OS-dev"          # dist/Productive-OS-dev.exe
+ISS_FILE      = os.path.join(BASE_DIR, "dev_setup.iss")
+OUTPUT_NAME   = "Productive-OS-Dev-Setup"    # final installer filename
 
-# ─── Build ────────────────────────────────────────────────────────────────────
+# Common Inno Setup search locations
+ISCC_CANDIDATES = [
+    r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    r"C:\Program Files\Inno Setup 6\ISCC.exe",
+    r"C:\Program Files (x86)\Inno Setup 5\ISCC.exe",
+    r"C:\Program Files\Inno Setup 5\ISCC.exe",
+]
 
-def build():
-    print("=" * 60)
-    print(f"  🔨 Building {APP_NAME}.exe")
-    print("=" * 60)
-    print()
+SEP = ";" if sys.platform == "win32" else ":"
 
-    # Validate that PyInstaller is available
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+def _banner(text: str):
+    bar = "=" * 62
+    print(f"\n{bar}\n  {text}\n{bar}")
+
+def _step(text: str):
+    print(f"\n[*] {text}")
+
+def _ok(text: str):
+    print(f"  ✅  {text}")
+
+def _fail(text: str):
+    print(f"  ❌  {text}")
+    sys.exit(1)
+
+
+def _find_iscc() -> str:
+    """Return the path to ISCC.exe, or exit with a helpful message."""
+    for path in ISCC_CANDIDATES:
+        if os.path.isfile(path):
+            return path
+    _fail(
+        "Inno Setup (ISCC.exe) not found.\n"
+        "  Download from: https://jrsoftware.org/isdownload.php\n"
+        "  Then re-run this script."
+    )
+
+
+def _check_deps():
+    """Ensure PyInstaller and pywebview are importable."""
+    _step("Checking dependencies")
     try:
-        import PyInstaller  # noqa
+        import PyInstaller  # noqa: F401
+        _ok("PyInstaller found")
     except ImportError:
-        print("[!] PyInstaller not found. Install it with:")
-        print("    pip install pyinstaller")
-        sys.exit(1)
+        _fail("PyInstaller not found. Run: pip install pyinstaller")
 
-    # Validate that pywebview is available
     try:
-        import webview  # noqa
+        import webview  # noqa: F401
+        _ok("pywebview found")
     except ImportError:
-        print("[!] pywebview not found. Install it with:")
-        print("    pip install pywebview")
-        sys.exit(1)
+        _fail("pywebview not found. Run: pip install pywebview")
 
-    # Separator character for --add-data (Windows uses semicolon)
-    sep = ";" if sys.platform == "win32" else ":"
+
+# ─── Stage 1: PyInstaller ─────────────────────────────────────────────────────
+
+def _run_pyinstaller():
+    _step("Running PyInstaller (local source only)")
+
+    os.makedirs(DIST_DIR, exist_ok=True)
+    os.makedirs(INSTALLER_DIR, exist_ok=True)
 
     args = [
         sys.executable, "-m", "PyInstaller",
         ENTRY_POINT,
-        f"--name={APP_NAME}",
-        "--onefile",              # Single .exe
-        "--noconsole",            # No terminal window
-        "--uac-admin",            # Request admin via OS UAC (no re-launch hack)
-        "--clean",                # Clean build cache
-        "--noconfirm",            # Overwrite without asking
+        f"--name={EXE_NAME}",
+        "--onefile",
+        "--noconsole",
+        "--uac-admin",
+        "--clean",
+        "--noconfirm",
 
-        # Embed the dashboard, extension, and core directories
-        f"--add-data={DASHBOARD_DIR}{sep}dashboard",
-        f"--add-data={EXTENSION_DIR}{sep}extension",
-        f"--add-data={CORE_DIR}{sep}core",
+        # Embed runtime assets
+        f"--add-data={DASHBOARD_DIR}{SEP}dashboard",
+        f"--add-data={EXTENSION_DIR}{SEP}extension",
+        f"--add-data={CORE_DIR}{SEP}core",
+        f"--add-data={os.path.join(BASE_DIR, 'ui.py')}{SEP}.",
 
-        # Include the UI module explicitly
-        f"--add-data={os.path.join(BASE_DIR, 'ui.py')}{sep}.",
-
-        # Hidden imports that PyInstaller sometimes misses
+        # Hidden imports
         "--hidden-import=websockets",
         "--hidden-import=bcrypt",
         "--hidden-import=psutil",
         "--hidden-import=webview",
         "--hidden-import=winreg",
+        "--hidden-import=wmi",
+        "--hidden-import=win32com",
+        "--hidden-import=win32com.client",
+        "--hidden-import=win32timezone",
+        "--hidden-import=pythoncom",
 
-        # Build output directory
-        f"--distpath={os.path.join(BASE_DIR, 'dist')}",
-        f"--workpath={os.path.join(BASE_DIR, 'build')}",
+        # Output locations
+        f"--distpath={DIST_DIR}",
+        f"--workpath={BUILD_DIR}",
         f"--specpath={BASE_DIR}",
     ]
 
-    print("[*] Running PyInstaller...")
-    print()
     result = subprocess.run(args, cwd=BASE_DIR)
+    if result.returncode != 0:
+        _fail("PyInstaller failed. Review the output above.")
 
+    exe_path = os.path.join(DIST_DIR, f"{EXE_NAME}.exe")
+    if not os.path.isfile(exe_path):
+        _fail(f"Expected output not found: {exe_path}")
+
+    _ok(f"Executable: {exe_path}")
+    return exe_path
+
+
+# ─── Stage 2: Generate dev_setup.iss ─────────────────────────────────────────
+
+def _generate_iss(exe_path: str):
+    _step("Generating dev_setup.iss")
+
+    # Read version from main.py comment, or default
+    version = "3.6.0"
+
+    iss = textwrap.dedent(f"""\
+        ; Productive-OS Dev Build — Inno Setup Script
+        ; Auto-generated by build.py — DO NOT EDIT MANUALLY
+
+        #define MyAppName      "Productive-OS (Dev Build)"
+        #define MyAppVersion   "{version}"
+        #define MyAppPublisher "Atharvotech"
+        #define MyAppURL       "https://github.com/atharvotech/Productive-OS"
+        #define MyAppExeName   "Productive-OS-dev.exe"
+        #define MyAppId        "{{B1A2C3D4-E5F6-7890-ABCD-EF1234567890}"
+
+        [Setup]
+        AppId={{{{#MyAppId}}}}
+        AppName={{#MyAppName}}
+        AppVersion={{#MyAppVersion}}
+        AppPublisher={{#MyAppPublisher}}
+        AppPublisherURL={{#MyAppURL}}
+        AppSupportURL={{#MyAppURL}}/issues
+        AppUpdatesURL={{#MyAppURL}}/releases
+        DefaultDirName={{autopf}}\\Atharvotech\\Productive-OS-Dev
+        DefaultGroupName=Atharvotech\\Productive-OS Dev
+        OutputDir={INSTALLER_DIR}
+        OutputBaseFilename={OUTPUT_NAME}
+        Compression=lzma2/ultra64
+        SolidCompression=yes
+        WizardStyle=modern
+        PrivilegesRequired=admin
+        ArchitecturesInstallIn64BitMode=x64compatible
+        UninstallDisplayName={{#MyAppName}}
+        UninstallDisplayIcon={{app}}\\{{#MyAppExeName}}
+        SetupIconFile=
+        DisableProgramGroupPage=no
+        AllowCancelDuringInstall=yes
+        ShowLanguageDialog=no
+
+        [Languages]
+        Name: "english"; MessagesFile: "compiler:Default.isl"
+
+        [Tasks]
+        Name: "desktopicon"; Description: "Create a &Desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+
+        [Files]
+        Source: "{exe_path}"; DestDir: "{{app}}"; Flags: ignoreversion
+
+        [Icons]
+        Name: "{{autoprograms}}\\Atharvotech\\Productive-OS Dev"; Filename: "{{app}}\\{{#MyAppExeName}}"
+        Name: "{{autodesktop}}\\Productive-OS Dev"; Filename: "{{app}}\\{{#MyAppExeName}}"; Tasks: desktopicon
+
+        [Run]
+        Filename: "{{app}}\\{{#MyAppExeName}}"; Description: "Launch Productive-OS (Dev)"; Flags: nowait postinstall skipifsilent
+
+        [UninstallDelete]
+        Type: filesandordirs; Name: "{{app}}"
+
+        [Code]
+        procedure CurStepChanged(CurStep: TSetupStep);
+        begin
+          // Kill any running dev instance before extracting files.
+          // This prevents "file in use" errors during iterative reinstalls.
+          if CurStep = ssInstall then
+          begin
+            Exec('cmd.exe',
+              '/C taskkill /F /IM {EXE_NAME}.exe > nul 2>&1',
+              '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+          end;
+        end;
+
+        procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+        begin
+          // Kill process before uninstaller tries to delete the exe
+          if CurUninstallStep = usUninstall then
+          begin
+            Exec('cmd.exe',
+              '/C taskkill /F /IM {EXE_NAME}.exe > nul 2>&1',
+              '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+          end;
+        end;
+    """)
+
+    with open(ISS_FILE, "w", encoding="utf-8") as f:
+        f.write(iss)
+
+    _ok(f"ISS script written: {ISS_FILE}")
+    return ISS_FILE
+
+
+# ─── Stage 3: Compile with ISCC ──────────────────────────────────────────────
+
+def _compile_iss(iss_path: str, iscc: str):
+    _step(f"Compiling installer with ISCC: {os.path.basename(iscc)}")
+
+    result = subprocess.run([iscc, iss_path], cwd=BASE_DIR)
+    if result.returncode != 0:
+        _fail("ISCC compilation failed. Review the output above.")
+
+    out = os.path.join(INSTALLER_DIR, f"{OUTPUT_NAME}.exe")
+    if not os.path.isfile(out):
+        _fail(f"Expected installer not found: {out}")
+
+    _ok(f"Installer: {out}")
+    return out
+
+
+# ─── Entry ────────────────────────────────────────────────────────────────────
+
+def build():
+    _banner("Productive-OS — DEV BUILD PIPELINE")
+    print("  Mode   : Local source only (no git pull)")
+    print(f"  Output : installer/{OUTPUT_NAME}.exe")
+
+    _check_deps()
+    iscc = _find_iscc()
+
+    exe_path = _run_pyinstaller()
+    iss_path = _generate_iss(exe_path)
+    installer = _compile_iss(iss_path, iscc)
+
+    _banner("DEV BUILD COMPLETE")
+    print(f"  Installer : {installer}")
     print()
-    if result.returncode == 0:
-        exe_path = os.path.join(BASE_DIR, "dist", f"{APP_NAME}.exe")
-        print("=" * 60)
-        print(f"  ✅ Build successful!")
-        print()
-        print(f"  Executable: {exe_path}")
-        print()
-        print("  Next steps:")
-        print(f"  1. Run:  dist\\{APP_NAME}.exe")
-        print("  2. Accept the UAC admin prompt")
-        print("  3. The Focus Engine dashboard will open")
-        print("  4. Complete the first-run setup in the dashboard")
-        print("=" * 60)
-    else:
-        print("=" * 60)
-        print("  ❌ Build FAILED. Check the output above for errors.")
-        print("=" * 60)
-        sys.exit(1)
+    print("  To install (run as admin):")
+    print(f"    {installer}")
+    print()
+    print("  The installer will:")
+    print("    • Kill any running Productive-OS-dev.exe (safe reinstall)")
+    print(f"    • Install to: %ProgramFiles%\\Atharvotech\\Productive-OS-Dev")
+    print("    • Create Start Menu entry: Atharvotech > Productive-OS Dev")
+    print()
 
 
 if __name__ == "__main__":
