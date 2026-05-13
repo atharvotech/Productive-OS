@@ -13,11 +13,13 @@ core/database.sqlite
 core/data.db-shm
 core/data.db-wal
 
-# Security & Config 
+# Security & Config
 core/admin_config.json
 *.json.lock
+# license.txt is intentionally tracked (needed by build pipeline)
 
 # project logs & debug tools
+
 _temp_tracker.py
 _window_dump.json
 _window_dump.txt

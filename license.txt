@@ -1,0 +1,144 @@
+PRODUCTIVE-OS — END USER LICENSE AGREEMENT (EULA)
+==================================================
+Software: Productive-OS v3.6
+Publisher: Atharvotech™
+Legal Representatives: Avni Shukla & Atharv Shukla
+Effective Date: May 2026
+Full Terms: https://github.com/atharvotech/Productive-OS/blob/main/LICENSE
+==================================================
+
+PLEASE READ THIS AGREEMENT CAREFULLY BEFORE INSTALLING OR USING
+PRODUCTIVE-OS. BY CLICKING "I ACCEPT", YOU CONFIRM THAT YOU HAVE READ,
+UNDERSTOOD, AND AGREE TO BE BOUND BY THESE TERMS IN THEIR ENTIRETY.
+IF YOU DO NOT AGREE, CLICK "I DO NOT ACCEPT" AND DO NOT INSTALL THE SOFTWARE.
+
+──────────────────────────────────────────────────
+1. GRANT OF LICENSE
+──────────────────────────────────────────────────
+Atharvotech™ (represented by Avni Shukla and Atharv Shukla) grants you a
+limited, non-exclusive, non-transferable, revocable license to install and
+use Productive-OS solely on a single Windows device owned or controlled by
+you, strictly for personal, non-commercial productivity purposes.
+
+──────────────────────────────────────────────────
+2. SYSTEM-LEVEL MODIFICATIONS — IMPORTANT NOTICE
+──────────────────────────────────────────────────
+By installing this software, you acknowledge and accept that Productive-OS
+makes active, system-level changes to your Windows operating system,
+including but not limited to:
+
+  • Writing to the Windows Registry (HKEY_LOCAL_MACHINE and
+    HKEY_CURRENT_USER hives) to enforce focus policies and extension
+    lockdown via Group Policy keys.
+
+  • Modifying system DNS settings via the Windows "netsh" command-line
+    utility to activate Cloudflare Family DNS (1.1.1.3) during focus
+    sessions.
+
+  • Installing a persistent task in Windows Task Scheduler to enable
+    the self-healing watchdog (auto-restart on process kill).
+
+  • Using Win32 API hooks (WMI Win32_ProcessStartTrace,
+    SetWinEventHook) to monitor and terminate foreground processes
+    classified as games or distractions during an active study session.
+
+  • Forcefully terminating third-party processes using psutil and the
+    Windows process management API when a focus session is active.
+
+These changes are intentional and are the core mechanism through which
+Productive-OS enforces focus sessions. They are reversed (where applicable)
+when a session ends or when the engine is disabled via the admin password.
+
+──────────────────────────────────────────────────
+3. INSTALLATION AT YOUR OWN RISK
+──────────────────────────────────────────────────
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED. TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW:
+
+  • Atharvotech™ and its representatives are NOT liable for any data
+    loss, system instability, software conflicts, or hardware damage
+    arising from the installation or use of Productive-OS.
+
+  • You are solely responsible for ensuring that the installation of
+    this software does not violate any applicable laws, regulations,
+    institutional policies, or third-party software agreements on
+    your device.
+
+  • Productive-OS requires and will request Administrator (UAC)
+    privileges. Granting such privileges is done entirely at your
+    own discretion and risk.
+
+  • Manually tampering with the Productive-OS SQLite database, config
+    files, or Registry entries while the engine is running may result
+    in an unrecoverable lockout. Always use the official Admin Password
+    flow to modify or stop an active session.
+
+──────────────────────────────────────────────────
+4. RESTRICTIONS
+──────────────────────────────────────────────────
+You may NOT:
+
+  (a) Copy, redistribute, sublicense, sell, rent, or lease this software
+      or any portion thereof to any third party.
+  (b) Reverse-engineer, decompile, disassemble, or attempt to derive the
+      source code of the compiled executable, except where expressly
+      permitted by applicable law.
+  (c) Remove, alter, or obscure any proprietary notices, branding, or
+      attribution contained in the software or its documentation.
+  (d) Use this software for any commercial purpose or on behalf of any
+      commercial entity without prior written consent from Atharvotech™.
+  (e) Attempt to bypass, circumvent, or disable the enforcement mechanisms
+      of this software using any automated tool, script, or manual method.
+
+──────────────────────────────────────────────────
+5. INTELLECTUAL PROPERTY
+──────────────────────────────────────────────────
+All source code, design assets, documentation, and associated materials
+of Productive-OS are the exclusive intellectual property of
+Atharvotech™ (Avni Shukla & Atharv Shukla). All rights are reserved.
+Nothing in this Agreement transfers any ownership or intellectual property
+rights to you.
+
+──────────────────────────────────────────────────
+6. PRIVACY & DATA COLLECTION
+──────────────────────────────────────────────────
+Productive-OS stores all tracking data — screen time, web activity,
+Spotify history, and token ledger — LOCALLY on your device in a
+SQLite database. No data is transmitted to external servers by the
+core engine. The bundled Chrome Extension communicates exclusively
+with the local WebSocket server (ws://localhost:8765) and does not
+send any data to third-party analytics services.
+
+──────────────────────────────────────────────────
+7. TERMINATION
+──────────────────────────────────────────────────
+This license is effective until terminated. It terminates automatically,
+without notice from Atharvotech™, if you breach any term of this Agreement.
+Upon termination, you must immediately uninstall the software and destroy
+all copies in your possession.
+
+──────────────────────────────────────────────────
+8. GOVERNING LAW
+──────────────────────────────────────────────────
+This Agreement shall be governed by and construed in accordance with the
+laws of India. Any disputes arising under this Agreement shall be subject
+to the exclusive jurisdiction of the courts of India.
+
+──────────────────────────────────────────────────
+9. FULL TERMS & CONDITIONS
+──────────────────────────────────────────────────
+The complete, legally binding Terms and Conditions for Productive-OS are
+available at:
+
+  https://github.com/atharvotech/Productive-OS/blob/main/LICENSE
+
+By proceeding with installation, you confirm that you have had the
+opportunity to read the full Terms and that your acceptance below
+constitutes a binding agreement.
+
+──────────────────────────────────────────────────
+© 2026 Atharvotech™
+Represented by: Avni Shukla & Atharv Shukla
+All Rights Reserved. Unauthorised reproduction or distribution is
+strictly prohibited.
+──────────────────────────────────────────────────

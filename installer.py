@@ -277,6 +277,10 @@ def _generate_iss(exe_path: str, version: str):
         ArchitecturesInstallIn64BitMode=x64compatible
         UninstallDisplayName={{#MyAppName}}
         UninstallDisplayIcon={{app}}\\{{#MyAppExeName}}
+        ; ── License ──────────────────────────────────────────────────────
+        ; LicenseFile forces an 'I Accept / I Do Not Accept' page.
+        ; The user CANNOT click Next until they select 'I Accept'.
+        LicenseFile={os.path.join(BASE_DIR, 'license.txt')}
         DisableProgramGroupPage=no
         AllowCancelDuringInstall=yes
         ShowLanguageDialog=no

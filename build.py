@@ -189,6 +189,10 @@ def _generate_iss(exe_path: str):
         UninstallDisplayName={{#MyAppName}}
         UninstallDisplayIcon={{app}}\\{{#MyAppExeName}}
         SetupIconFile=
+        ; ── License ──────────────────────────────────────────────────────
+        ; LicenseFile forces an 'I Accept / I Do Not Accept' page.
+        ; The user CANNOT click Next until they select 'I Accept'.
+        LicenseFile={os.path.join(BASE_DIR, 'license.txt')}
         DisableProgramGroupPage=no
         AllowCancelDuringInstall=yes
         ShowLanguageDialog=no
