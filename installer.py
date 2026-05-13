@@ -256,7 +256,7 @@ def _generate_iss(exe_path: str, version: str):
         #define MyAppPublisher "Atharvotech"
         #define MyAppURL       "https://github.com/atharvotech/Productive-OS"
         #define MyAppExeName   "Productive-OS.exe"
-        #define MyAppId        "{{A0B1C2D3-E4F5-6789-BCDE-F01234567890}"
+        #define MyAppId        "{{8c74dee1-567d-45be-9e0a-f9c2981e5aa2}}"
 
         [Setup]
         AppId={{{{#MyAppId}}}}

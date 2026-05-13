@@ -167,10 +167,10 @@ def _generate_iss(exe_path: str):
         #define MyAppPublisher "Atharvotech"
         #define MyAppURL       "https://github.com/atharvotech/Productive-OS"
         #define MyAppExeName   "Productive-OS-dev.exe"
-        #define MyAppId        "{{B1A2C3D4-E5F6-7890-ABCD-EF1234567890}"
+        #define MyAppId        "b0e8a225-b4e7-4303-ad11-79cd3476a9ec"
 
         [Setup]
-        AppId={{{{#MyAppId}}}}
+        AppId={{{{b0e8a225-b4e7-4303-ad11-79cd3476a9ec}}}}
         AppName={{#MyAppName}}
         AppVersion={{#MyAppVersion}}
         AppPublisher={{#MyAppPublisher}}
@@ -217,6 +217,8 @@ def _generate_iss(exe_path: str):
         Type: filesandordirs; Name: "{{app}}"
 
         [Code]
+        var
+          ResultCode: Integer;
         procedure CurStepChanged(CurStep: TSetupStep);
         begin
           // Kill any running dev instance before extracting files.
