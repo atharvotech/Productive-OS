@@ -161,7 +161,8 @@ function scheduleReconnect() {
 
 function sendWS(data) {
   if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-    wsConnection.send(JSON.stringify(data));
+    const payload = { ...data, client: "extension" };
+    wsConnection.send(JSON.stringify(payload));
   }
 }
 

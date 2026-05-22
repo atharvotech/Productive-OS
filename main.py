@@ -50,9 +50,6 @@ GITHUB_REPO          = "atharvotech/Productive-OS"
 GITHUB_API_URL       = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_CHECK_SECS    = 6 * 3600   # Check for updates every 6 hours
 
-# ─── Module-level IPC signal (set by HTTP handler, consumed by main thread) ───
-_show_window_event = threading.Event()
-
 
 # ─── Admin Elevation (dev-mode only) ─────────────────────────────────────────
 
@@ -108,26 +105,6 @@ def _base_dir() -> str:
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
-
-# ─── IPC: signal the running engine to show its window ───────────────────────
-
-def _ipc_show_window():
-    """
-    Called by the HTTP /ipc/show-window endpoint (from the existing engine process).
-
-    Priority:
-      1. If the "Productive-OS" window already exists → restore + focus it via Win32.
-      2. If no window exists (background engine) → set the show-window event so
-         the main thread can call open_window() on the correct thread.
-    """
-    hwnd = ctypes.windll.user32.FindWindowW(None, "Productive-OS")
-    if hwnd:
-        ctypes.windll.user32.ShowWindow(hwnd, 9)   # SW_RESTORE
-        ctypes.windll.user32.SetForegroundWindow(hwnd)
-        print("[IPC] Focused existing Productive-OS window.")
-    else:
-        _show_window_event.set()
-        print("[IPC] No window found — signalled main thread to open dashboard.")
 
 
 # ─── Auto-Update (background thread) ─────────────────────────────────────────
@@ -255,31 +232,28 @@ def main():
 
     # 2. Acquire the singleton mutex.
     mutex = ctypes.windll.kernel32.CreateMutexW(None, False, MUTEX_NAME)
-    if ctypes.windll.kernel32.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-        # The background engine is already running (no visible window yet).
+    err = ctypes.windll.kernel32.GetLastError()
+    if err in (winerror.ERROR_ALREADY_EXISTS, 5):  # 5 = ERROR_ACCESS_DENIED
+        # The background engine is already running.
         if not args.background:
-            # Send an IPC signal to the running engine asking it to open the
-            # dashboard on its own main thread (pywebview requires main thread).
-            # Fall back to opening a local window if the IPC call fails.
-            import urllib.request
-            try:
-                urllib.request.urlopen(
-                    f"http://localhost:{HTTP_PORT}/ipc/show-window",
-                    timeout=3,
-                )
-                print("[*] IPC signal sent — running engine will open the dashboard.")
-            except Exception as e:
-                # Engine might not have its HTTP server up yet (race at boot).
-                # Fall back: open the webview window in this process instead.
-                print(f"[*] IPC signal failed ({e}) — opening window locally as fallback.")
-                from ui import open_window
-                open_window(HTTP_PORT)
+            # We skip all UAC/admin checks. This lightweight process just
+            # launches the UI which connects to the existing background engine.
+            print("[*] Background engine detected. Opening dashboard UI locally.")
+            from ui import open_window
+            open_window(HTTP_PORT)
         sys.exit(0)
 
     # ── Elevation check (We need admin to start the engine) ───────────────
     if not is_admin():
-        elevate_dev(background=args.background)
-        return  # Current process exits; elevated child takes over
+        # Spawn the background engine elevated (this uses SW_HIDE)
+        elevate_dev(background=True)
+        # Now the background engine is starting up. 
+        if not args.background:
+            print("[*] Background engine spawned. Opening dashboard UI locally.")
+            time.sleep(1)  # wait a moment for the background HTTP server to start
+            from ui import open_window
+            open_window(HTTP_PORT)
+        sys.exit(0)
 
     # ── Engine startup ────────────────────────────────────────────────────
     from core import database as db
@@ -321,11 +295,7 @@ def main():
         shutdown.set()
 
     # ── WebSocket + HTTP servers ──────────────────────────────────────────
-    from core.api_server import start_api_server, start_http_server, set_show_window_callback
-
-    # Register the IPC callback BEFORE starting the HTTP server so the
-    # endpoint is wired up the moment the server starts accepting connections.
-    set_show_window_callback(_ipc_show_window)
+    from core.api_server import start_api_server, start_http_server
 
     api = start_api_server(
         auth=auth,
@@ -353,24 +323,9 @@ def main():
         # The engine continues running in background — don't shut down here.
 
     # ── Main thread event loop ────────────────────────────────────────────
-    # Watches two signals:
-    #   shutdown          → graceful engine teardown
-    #   _show_window_event → IPC trigger: open/re-open the dashboard window
-    #
-    # pywebview.start() MUST be called on the main thread (Windows requirement).
-    # By watching _show_window_event here, we satisfy that constraint for IPC
-    # requests that arrive while the engine is running headlessly in background.
     print("[*] Engine is running. Main thread entering event loop.")
     while not shutdown.is_set():
-        if _show_window_event.wait(timeout=0.5):
-            _show_window_event.clear()
-            try:
-                from ui import open_window
-                print("[IPC] Opening dashboard window on main thread.")
-                open_window(HTTP_PORT, shutdown_event=shutdown)
-                # Returns when the user closes the window — loop continues.
-            except Exception as e:
-                print(f"[IPC] Failed to open window: {e}")
+        time.sleep(0.5)
 
     # ── Graceful shutdown ─────────────────────────────────────────────────
     tracker.stop()

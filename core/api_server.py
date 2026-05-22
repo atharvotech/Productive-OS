@@ -25,11 +25,6 @@ def _base_dir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-_show_window_callback = None
-
-def set_show_window_callback(cb):
-    global _show_window_callback
-    _show_window_callback = cb
 
 
 # ─── HTTP Static File Server (for dashboard) ──────────────────────────────
@@ -114,16 +109,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
                 return
                 
-        # Intercept IPC show-window
-        if parsed_path.path == '/ipc/show-window':
-            if _show_window_callback:
-                _show_window_callback()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(b'{"status":"ok"}')
-            return
-            
+
         # For all other paths, serve static files
         try:
             super().do_GET()
@@ -193,6 +179,9 @@ class APIServer:
 
     async def _process_command(self, data: dict) -> dict:
         """Route incoming commands to appropriate handlers."""
+        if data.get("client") == "extension" and self.tracker:
+            self.tracker.record_extension_ping()
+
         action = data.get("action", "")
 
         # ── First-run setup (no auth, only works when no password set) ────

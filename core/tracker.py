@@ -469,6 +469,15 @@ class ActivityTracker:
         self._enforcer_thread = None
         self._extensions_locked = False
 
+        # Extension heartbeat and enforcement tracking
+        self.last_extension_ping = time.time()
+        self.browser_entered_foreground_time = None
+        self.last_extension_warning_time = 0.0
+
+    def record_extension_ping(self):
+        """Record the timestamp of the last heartbeat from the Chrome extension."""
+        self.last_extension_ping = time.time()
+
     def start(self):
         """Start the tracker in a daemon thread."""
         load_whitelists_from_db()
@@ -500,57 +509,58 @@ class ActivityTracker:
         except Exception:
             pass
 
-    # ── Extension Page Lock (prevent disabling extension) ─────────────────
-    def _lock_extension_pages(self, lock: bool):
-        """Block or unblock chrome://extensions and edge://extensions via browser policy.
-        
-        Uses URLBlocklist registry policy to prevent students from accessing
-        the extensions management page and disabling the Focus Engine extension.
-        """
+    # ── Extension Management (Packed Extension Model) ─────────────────────
+    def _cleanup_url_blocklist(self):
+        """One-time cleanup to remove old URLBlocklist entries that locked extension pages."""
         import winreg
-
-        # Policies for Chrome and Edge
         policies = [
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Google\Chrome\URLBlocklist"),
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Edge\URLBlocklist"),
         ]
-        blocked_urls = [
-            "chrome://extensions",
-            "chrome://extensions/*",
-            "edge://extensions",
-            "edge://extensions/*",
-        ]
-
-        try:
-            if lock:
-                for hive, path in policies:
+        for hive, path in policies:
+            try:
+                key = winreg.OpenKey(hive, path, 0, winreg.KEY_SET_VALUE | winreg.KEY_READ)
+                for i in range(100, 104):
                     try:
-                        key = winreg.CreateKey(hive, path)
-                        for i, url in enumerate(blocked_urls):
-                            winreg.SetValueEx(key, str(i + 100), 0, winreg.REG_SZ, url)
-                        winreg.CloseKey(key)
-                    except PermissionError:
-                        print(f"[!] No permission to write policy: {path}")
-                self._extensions_locked = True
-                print("[*] Extension pages LOCKED (chrome://extensions blocked)")
-            else:
-                for hive, path in policies:
-                    try:
-                        key = winreg.OpenKey(hive, path, 0,
-                                            winreg.KEY_SET_VALUE | winreg.KEY_READ)
-                        # Remove only our entries (keys 100-103)
-                        for i in range(100, 104):
-                            try:
-                                winreg.DeleteValue(key, str(i))
-                            except FileNotFoundError:
-                                pass
-                        winreg.CloseKey(key)
-                    except (FileNotFoundError, PermissionError):
+                        winreg.DeleteValue(key, str(i))
+                    except FileNotFoundError:
                         pass
-                self._extensions_locked = False
-                print("[*] Extension pages UNLOCKED")
-        except Exception as e:
-            print(f"[!] Extension lock error: {e}")
+                winreg.CloseKey(key)
+            except (FileNotFoundError, PermissionError):
+                pass
+
+    def _enforce_extension_forcelist(self, enable: bool):
+        """Force-install the extension via registry policies when focus mode is active."""
+        import winreg
+        policies = [
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Edge\ExtensionInstallForcelist"),
+        ]
+        # Placeholder for packed extension model
+        extension_val = "YOUR_EXTENSION_ID;https://yourwebsite.com/update.xml"
+        
+        for hive, path in policies:
+            if enable:
+                try:
+                    key = winreg.CreateKey(hive, path)
+                    winreg.SetValueEx(key, "100", 0, winreg.REG_SZ, extension_val)
+                    winreg.CloseKey(key)
+                except PermissionError:
+                    print(f"[!] No permission to write ExtensionInstallForcelist: {path}")
+            else:
+                try:
+                    key = winreg.OpenKey(hive, path, 0, winreg.KEY_SET_VALUE | winreg.KEY_READ)
+                    try:
+                        winreg.DeleteValue(key, "100")
+                    except FileNotFoundError:
+                        pass
+                    winreg.CloseKey(key)
+                except (FileNotFoundError, PermissionError):
+                    pass
+        
+        self._extensions_locked = enable
+        state = "ENFORCED" if enable else "REMOVED"
+        print(f"[*] ExtensionInstallForcelist {state}")
 
 
     # ── Registry Snap Lock ────────────────────────────────────────────────
@@ -689,23 +699,26 @@ class ActivityTracker:
 
     def _on_mode_changed(self, old_mode: str, new_mode: str):
         """Called whenever focus_mode changes in the DB."""
+        # Always run one-time cleanup of legacy URLBlocklist
+        self._cleanup_url_blocklist()
+        
         if new_mode == "study":
             self._apply_snap_lock(True)
-            self._lock_extension_pages(True)
+            self._enforce_extension_forcelist(True)
             print("[*] Study Mode ON — window enforcement active")
         elif new_mode == "productive":
             # Productive mode: no window enforcement, but lock extension pages
             if old_mode == "study":
                 self._restore_all_windows()
                 self._apply_snap_lock(False)
-            self._lock_extension_pages(True)
+            self._enforce_extension_forcelist(True)
             print("[*] Productive Mode ON — extension pages locked")
         else:
             # Mode is "off" — lift ALL restrictions
             if old_mode == "study":
                 self._restore_all_windows()
                 self._apply_snap_lock(False)
-            self._lock_extension_pages(False)
+            self._enforce_extension_forcelist(False)
             print("[*] Mode OFF — all restrictions lifted")
 
     def stop(self):
@@ -714,7 +727,7 @@ class ActivityTracker:
         if self._snap_locked:
             self._apply_snap_lock(False)
         if self._extensions_locked:
-            self._lock_extension_pages(False)
+            self._enforce_extension_forcelist(False)
 
     # ── WinEvent-Driven Study Enforcer ───────────────────────────────────
     def _study_enforcer_loop(self):
@@ -906,6 +919,36 @@ class ActivityTracker:
                 app = info["app"]
                 title = info["title"]
                 is_maximized = info.get("is_maximized", True)
+
+                app_lower = app.lower()
+                is_browser = app_lower in BROWSER_APPS
+
+                if is_browser:
+                    if self.browser_entered_foreground_time is None:
+                        self.browser_entered_foreground_time = now
+                else:
+                    self.browser_entered_foreground_time = None
+
+                # ── Heartbeat monitoring for Focus Engine Chrome/Edge extension ──
+                if self._current_mode in ("study", "productive") and is_browser and fg_hwnd and not is_minimized:
+                    if self.browser_entered_foreground_time is not None:
+                        if (now - self.browser_entered_foreground_time) >= 8.0:
+                            if (now - self.last_extension_ping) > 45.0:
+                                try:
+                                    ctypes.windll.user32.ShowWindow(fg_hwnd, 6) # SW_MINIMIZE = 6
+                                    print(f"[*] Minimized {app} - Focus Engine extension is disabled/inactive.")
+                                    if now - self.last_extension_warning_time > 15.0:
+                                        self.last_extension_warning_time = now
+                                        def show_warning_box():
+                                            ctypes.windll.user32.MessageBoxW(
+                                                0,
+                                                "The Focus Engine Pro extension is disabled or disconnected!\n\nPlease enable the extension in your browser to continue browsing during Focus Mode.",
+                                                "Focus Engine Pro",
+                                                0x00000030
+                                            )
+                                        threading.Thread(target=show_warning_box, daemon=True).start()
+                                except Exception as e:
+                                    print(f"[!] Heartbeat enforcement error: {e}")
 
                 if is_minimized or not app or app == "Unknown" or title == "":
                     category = "idle"

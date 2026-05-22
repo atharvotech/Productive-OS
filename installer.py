@@ -190,6 +190,17 @@ def _run_pyinstaller(stage_root: str):
         if not os.path.exists(path):
             _fail(f"Required path missing from staged source: {path}")
 
+    # Kill any running instance to avoid PermissionError during PyInstaller COLLECT phase
+    result = subprocess.run(["taskkill", "/F", "/IM", f"{EXE_NAME}.exe"], capture_output=True, text=True)
+    if result.returncode != 0 and ("Access is denied" in result.stderr or "Access is denied" in result.stdout):
+        print(f"\n[!] ERROR: '{EXE_NAME}.exe' is running as Administrator!")
+        print(f"[!] Your terminal does not have permission to stop it.")
+        print(f"[!] Please open Task Manager, end the process, and try again.\n")
+        sys.exit(1)
+        
+    import time
+    time.sleep(1)
+
     os.makedirs(DIST_DIR, exist_ok=True)
     os.makedirs(INSTALLER_DIR, exist_ok=True)
 
@@ -410,6 +421,8 @@ def _generate_iss(exe_dir: str, exe_path: str, version: str):
           begin
             // Create the scheduled task AFTER all files are extracted.
             CreateAutoStartTask();
+            // Start the background engine immediately so we don't have to wait for a reboot
+            Exec('cmd.exe', '/C schtasks /Run /TN "' + ExpandConstant('{{#TaskName}}') + '" >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
           end;
         end;
 

@@ -17,7 +17,10 @@ def _base_dir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-TASK_NAME = "FocusEnginePro"
+if "dev" in os.path.basename(sys.executable).lower():
+    TASK_NAME = "ProductiveOS_Dev_AutoStart"
+else:
+    TASK_NAME = "ProductiveOS_AutoStart"
 
 
 class Watchdog:

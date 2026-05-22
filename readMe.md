@@ -2,20 +2,20 @@
 
 <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?style=for-the-badge&logo=windows&logoColor=white"/>
 <img src="https://img.shields.io/badge/Python-3.8+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
-<img src="https://img.shields.io/badge/Version-3.6-blueviolet?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/Version-3.7--(beta)-blueviolet?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge"/>
 
 <br/><br/>
 
-# 🧠 Productive-OS v3.6
+# 🧠 Productive-OS v3.7 (beta)
 ### *Your AI-Powered Study Partner — Not Just Another Website Blocker*
 
 > **The only Windows productivity tool that locks down your entire system at the OS level, rewards your focus with real tokens, detects games dynamically, and fights back when you try to cheat.**
 
 <br/>
 
-[📥 Installation](#-installation--setup) · [🗺️ Architecture](#-system-architecture) · [✨ Features](#-feature-breakdown) · [🔧 Troubleshooting](#%EF%B8%8F-troubleshooting--faq) · [🗺️ Roadmap](#%EF%B8%8F-roadmap)
+[📥 Installation](#-installation--setup) · [🗺️ Architecture](#-system-architecture) · [✨ Features](#-feature-breakdown) · [🔧 Troubleshooting](#%EF%B8%8F-troubleshooting--faq) · [🗺️ Roadmap](#%EF%B8%8F-roadmap) · [🧹 Uninstall](#-complete-uninstallation--wipe)
 
 </div>
 
@@ -24,17 +24,18 @@
 ## 📋 Table of Contents
 
 1. [Why Productive-OS Is Different](#-why-productive-os-is-different)
-2. [What's New in v3.6](#-whats-new-in-v36)
+2. [What's New in v3.7 (beta)](#-whats-new-in-v37-beta)
 3. [Feature Breakdown](#-feature-breakdown)
 4. [System Architecture](#-system-architecture)
 5. [Tech Stack](#-tech-stack)
 6. [Installation & Setup](#-installation--setup)
-7. [Project File Structure](#-project-file-structure)
-8. [Engine Lifecycle](#-engine-lifecycle)
-9. [Dashboard Preview](#%EF%B8%8F-dashboard-preview)
-10. [Troubleshooting & FAQ](#%EF%B8%8F-troubleshooting--faq)
-11. [Roadmap](#%EF%B8%8F-roadmap)
-12. [Disclaimer](#%EF%B8%8F-disclaimer)
+7. [Complete Uninstallation & Wipe](#-complete-uninstallation--wipe)
+8. [Project File Structure](#-project-file-structure)
+9. [Engine Lifecycle](#-engine-lifecycle)
+10. [Dashboard Preview](#%EF%B8%8F-dashboard-preview)
+11. [Troubleshooting & FAQ](#%EF%B8%8F-troubleshooting--faq)
+12. [Roadmap](#%EF%B8%8F-roadmap)
+13. [Disclaimer](#%EF%B8%8F-disclaimer)
 
 ---
 
@@ -52,6 +53,26 @@ Instead of playing nice, it digs deep into your Windows system. It:
 - 🔒 Locks itself behind an admin password with a **self-healing watchdog** process
 
 When you actually study? It **rewards** you — with a token economy that unlocks real game time. Focus stops being a punishment. It becomes a game you can win.
+
+---
+
+## 🆕 What's New in v3.7 (beta)
+
+### 🚀 Headless Engine & Decoupled Native UI
+The core application has been re-architected for a seamless, premium user experience:
+- **Zero UAC Prompts for UI**: The front-end UI (`pywebview`) is decoupled from the background process, allowing it to open instantly in user-space without UAC prompts.
+- **Single-Instance Mutex & Focus Behavior**: Spawning a second window automatically focuses the existing window instead of creating duplicate processes (matching Spotify-style native behaviour).
+- **Background Startup via Task Scheduler**: Administrative rights are requested once during installation to register a Scheduled Task. The engine starts silently on logon at `/rl HIGHEST`, bypassing UAC.
+
+### ⚡ PyInstaller Folder-Based Distribution
+We migrated the build process from a slow `--onefile` package (which took 5–10 seconds to extract at launch) to a folder-based distribution. Startup is now **instant**.
+
+### 🔄 True Silent Auto-Updates
+The background engine now automatically checks for updates from GitHub Releases:
+- It downloads the latest binaries silently, shuts down the active instance, overwrites the PyInstaller folder in place, and re-executes the Scheduled Task, ensuring zero downtime and zero data loss.
+
+### 🧹 Official Uninstall & Clean Wipe Scripts
+We added dedicated `uninstall.bat` and `uninstall.ps1` scripts to fully purge the app, removing all scheduled tasks, registry policies, DNS configurations, database tables, and temporary debug logs (preserving compiled installer binaries).
 
 ---
 
@@ -230,16 +251,17 @@ sequenceDiagram
 | **Data & Auth** | SQLite3, `bcrypt` |
 | **Real-Time API** | `websockets` (Port 8765) + stdlib HTTP Server (Port 8123) |
 | **Frontend Dashboard** | HTML5, Vanilla CSS (Glassmorphism), Vanilla JS, Chart.js 4.x |
-| **Native Window** | `pywebview` (wraps dashboard in a native OS window) |
-| **Browser Integration** | Chrome Extension — Manifest V3 + Background Service Worker |
-| **Persistence** | Windows Task Scheduler (`schtasks`) for watchdog auto-restart |
-| **Build** | PyInstaller (`build.py`) — single `.exe` with `--uac-admin` |
+| **Native Window** | `pywebview` (wraps dashboard in a native OS window, runs non-elevated) |
+| **Browser Integration** | Chrome Extension — Manifest V3 + Packed force-install policy (`ExtensionInstallForcelist`) |
+| **Persistence** | Windows Task Scheduler (`schtasks`) at `/rl HIGHEST` for silent boot without UAC prompts |
+| **Build** | PyInstaller + Inno Setup (`build.py` & `installer.py`) — Folder-based setup packages (`.exe`) |
+| **Clean Uninstall** | `uninstall.bat` (CMD) & `uninstall.ps1` (PowerShell) for a complete system wipe |
 
 ---
 
 ## 🚀 Installation & Setup
 
-> ⏱️ **Total setup time: ~5 minutes**
+> ⏱️ **Total setup time: ~3 minutes**
 
 ### Step 1 — Clone & Install Dependencies
 
@@ -256,37 +278,44 @@ pip install -r requirements.txt
 1. Open Chrome or Brave → navigate to `chrome://extensions/`
 2. Enable **Developer Mode** (toggle, top-right)
 3. Click **Load unpacked** → select the `extension/` folder
+*(Note: Production builds force-install this automatically using group policy registry overrides).*
 
-This connects your browser's real-time tab activity to the engine.
+### Step 3 — Run the Local Dev Build or Compile Installer
 
-### Step 3 — Launch as Administrator
+- **To run in development mode (from source)**:
+  Launch terminal as Administrator and run:
+  ```bash
+  python main.py
+  ```
+- **To compile a local installer**:
+  Make sure you have [Inno Setup](https://jrsoftware.org/isdownload.php) installed on your system. Then run:
+  ```bash
+  # Compile local dev build installer
+  python build.py
+  
+  # Or compile production installer (pulls latest release from GitHub)
+  python installer.py
+  ```
+  This creates `Productive-OS-Dev-Setup.exe` or `Productive-OS-Setup.exe` in the `installer/` directory. Run the executable as Administrator once. It will install the application and configure the scheduled start task.
 
-> ⚠️ **Required.** DNS and Registry modifications need elevated privileges.
+---
 
-```bash
-# Right-click terminal → "Run as Administrator", then:
-python main.py
-```
+## 🧹 Complete Uninstallation & Wipe
 
-On first run, the dashboard will guide you through creating your **Admin Password** and **Security Recovery Question**.
+If you need to uninstall the app completely, revert registry group policies, reset DNS overrides, and clear SQLite telemetry databases:
 
-### Step 4 — Open Your Dashboard
+### Option A (Recommended)
+1. Navigate to the project root directory.
+2. Right-click [uninstall.bat](file:///c:/Users/athar/OneDrive/Desktop/Productive-OS/uninstall.bat) and choose **"Run as administrator"**.
+3. Press any key once the wipe finishes.
 
-The native pywebview window opens automatically. To open manually in a browser:
-
-```
-http://localhost:8123
-```
-
-Your focus engine is live. 🔥
-
-### Step 5 — (Optional) Build a Standalone .exe
-
-```bash
-python build.py
-```
-
-Produces a single `Productive-OS.exe` in `dist/` with UAC admin elevation built in.
+### Option B (PowerShell)
+1. Open an Administrator PowerShell console.
+2. Run the cleanup script:
+   ```powershell
+   Set-ExecutionPolicy Bypass -Scope Process -Force
+   .\uninstall.ps1
+   ```
 
 ---
 
@@ -299,9 +328,9 @@ Productive-OS/
 │   ├── api_server.py            # WebSocket (8765) + HTTP (8123) server
 │   ├── app_killer.py            # Event-driven game detection & termination
 │   ├── auth.py                  # Admin password + bcrypt + recovery Q&A
-│   ├── database.py              # SQLite telemetry, token ledger, web time
-│   ├── dns_blocker.py           # Cloudflare Family DNS via netsh
-│   ├── tracker.py               # Window activity poller + Spotify tracker
+│   ├── database.py              # SQLite database layer (core/data.db)
+│   ├── dns_blocker.py           # Cloudflare Family DNS via netsh + incognito block
+│   ├── tracker.py               # Window activity poller + Registry blocklist
 │   └── watchdog.py              # Task Scheduler self-healing guardian
 │
 ├── dashboard/                   # Web UI (served at localhost:8123)
@@ -316,7 +345,10 @@ Productive-OS/
 │
 ├── main.py                      # Master Orchestrator — entry point
 ├── ui.py                        # pywebview native window launcher
-├── build.py                     # PyInstaller build script
+├── build.py                     # Local dev builder (packages folders)
+├── installer.py                 # Production GitHub pull builder
+├── uninstall.bat                # One-click admin uninstall batch utility
+├── uninstall.ps1                # Admin uninstall PowerShell utility
 └── requirements.txt
 ```
 
@@ -447,6 +479,7 @@ The engine gracefully falls back to a lightweight 3-second polling loop (trackin
 - [x] Extension page lockdown (`chrome://extensions` via Group Policy registry)
 - [x] **v3.5**: Background headless engine, 10s flush, Spotify fix, web date filter
 - [x] **v3.6**: Event-driven WMI game detection, Google Play Games, emulator blocking, critical bug fixes, singleton mutex
+- [x] **v3.7 (beta)**: Decoupled UI launcher, Scheduled Task startup, folder distribution, auto-update mechanism, dedicated uninstaller scripts
 
 ### 🔜 Upcoming
 - [ ] **Pomodoro Mode** — enforced 25/5 break timers with mandatory lock screen
@@ -491,7 +524,7 @@ This is a personal project and is currently closed for external distribution or 
 
 <br/>
 
-<img src="https://img.shields.io/badge/Version-3.6-blueviolet?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/Version-3.7--(beta)-blueviolet?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Built%20in-India-FF9933?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Powered%20by-Python-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
 
