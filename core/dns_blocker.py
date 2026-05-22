@@ -10,9 +10,9 @@ import winreg
 
 
 # ── Safe, family-safe public DNS servers ──────────────────────────────────
-# Cloudflare Family (1.1.1.3 / 1.0.0.3) — blocks malware + adult content
-SAFE_DNS_PRIMARY   = "1.1.1.3"
-SAFE_DNS_SECONDARY = "1.0.0.3"
+# AdGuard Family DNS — blocks malware + adult content (Less likely to be blocked by ISPs)
+SAFE_DNS_PRIMARY   = "94.140.14.15"
+SAFE_DNS_SECONDARY = "94.140.15.16"
 
 # Google public DNS — used as the restore target (neutral)
 DEFAULT_DNS_PRIMARY   = "8.8.8.8"

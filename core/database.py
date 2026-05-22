@@ -126,7 +126,7 @@ def init_db():
         "auto_focus_threshold_min": "30",
         "token_earn_rate": "30",        # tokens per hour of study
         "token_deduct_rate": "15",      # tokens per hour of gaming
-        "dns_blocking": "on",
+        "dns_blocking": "off",
         "blocked_keywords": "reels,shorts,tiktok,gaming,porn",
         "whitelisted_apps": "steam.exe,steamwebhelper.exe,DesktopMate.exe,VTube Studio.exe",
         "whitelisted_channels": "",
