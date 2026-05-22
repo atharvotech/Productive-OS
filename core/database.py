@@ -523,11 +523,22 @@ def get_streak() -> int:
     streak = 0
     for i in range(365):
         d = (today - datetime.timedelta(days=i)).isoformat()
-        row = conn.execute(
+        
+        # Get desktop study time
+        desktop_row = conn.execute(
             "SELECT SUM(seconds) as s FROM screen_time WHERE date=? AND category='study'",
             (d,),
         ).fetchone()
-        if row and row["s"] and row["s"] > 0:
+        desktop_sec = desktop_row["s"] if desktop_row and desktop_row["s"] else 0
+        
+        # Get web study time
+        web_row = conn.execute(
+            "SELECT SUM(seconds) as s FROM web_time WHERE date=? AND category='study'",
+            (d,),
+        ).fetchone()
+        web_sec = web_row["s"] if web_row and web_row["s"] else 0
+        
+        if (desktop_sec + web_sec) > 0:
             streak += 1
         else:
             if i == 0:

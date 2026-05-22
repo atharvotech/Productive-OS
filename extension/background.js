@@ -74,6 +74,7 @@ const STUDY_SAFE_DOMAINS = [
   "npmjs.com", "pypi.org", "crates.io",
   "arxiv.org", "scholar.google.com", "wikipedia.org",
   "medium.com", "dev.to", "hashnode.dev",
+  "pw.live",
 
   "colab.research.google.com",
 ];
@@ -243,6 +244,7 @@ function tickTime() {
   const now = Date.now();
   const elapsed = Math.round((now - lastTickTime) / 1000);
   lastTickTime = now;
+  chrome.storage.local.set({ lastTickTime });
 
   if (browserHasFocus && activeTabDomain && elapsed > 0 && elapsed < 300) {
     if (!timeData[activeTabDomain]) {
@@ -251,6 +253,7 @@ function tickTime() {
     timeData[activeTabDomain].seconds += elapsed;
     timeData[activeTabDomain].url = activeTabUrl;
     timeData[activeTabDomain].title = activeTabTitle;
+    chrome.storage.local.set({ timeData });
 
     // Track productive mode domain timers
     if (currentMode === "productive") {
@@ -314,6 +317,7 @@ function checkProductiveTimer(domain, elapsedSec) {
     // Show a notification reminder
     showProductiveReminder(matchedDomain, Math.round(minutesSpent));
   }
+  chrome.storage.local.set({ domainTimers });
 }
 
 function showProductiveReminder(domain, minutes) {
@@ -411,6 +415,7 @@ function syncTimeData() {
     }
   }
   timeData = {};
+  chrome.storage.local.set({ timeData });
 }
 
 function classifyDomain(domain, title = "", isMaximized = true) {
@@ -740,8 +745,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       mediaPlayingTabId = null;
     }
     sendResponse({ action: "ack" });
+  } else if (message.type === "heartbeat") {
+    // Content script sends a heartbeat every 5s if tab is active/focused
+    browserHasFocus = true;
+    activeTabId = sender.tab?.id;
+    activeTabUrl = message.url || "";
+    activeTabTitle = message.title || "";
+    activeTabDomain = getDomain(activeTabUrl);
+    tickTime();
+    sendResponse({ action: "ack" });
   }
   return true;
+});
+
+chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+  if (tabId === activeTabId) {
+    tickTime();
+    activeTabDomain = "";
+    activeTabUrl = "";
+    activeTabTitle = "";
+  }
+});
+
+chrome.runtime.onSuspend.addListener(() => {
+  tickTime();
 });
 
 // ─── Alarms (periodic tasks) ─────────────────────────────────────────────
@@ -785,8 +812,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // ─── Initialize ──────────────────────────────────────────────────────────
 
-chrome.storage.local.get(["currentMode"], (result) => {
-  currentMode = result.currentMode || "off";
+chrome.storage.local.get(["currentMode", "timeData", "lastTickTime", "domainTimers"], (result) => {
+  if (result.currentMode) currentMode = result.currentMode;
+  if (result.timeData) timeData = result.timeData;
+  if (result.lastTickTime) lastTickTime = result.lastTickTime;
+  if (result.domainTimers) domainTimers = result.domainTimers;
 });
 
 connectWebSocket();

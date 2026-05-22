@@ -211,4 +211,17 @@
 
   // Periodic heartbeat — re-check every 3 seconds in case events were missed
   setInterval(checkAnyMediaPlaying, 3000);
+
+  // ─── Periodic Active Page Heartbeat ──────────────────────────────────
+  // Sends a heartbeat every 5 seconds if the page is visible and focused
+  setInterval(() => {
+    if (document.visibilityState === "visible" && document.hasFocus()) {
+      try {
+        chrome.runtime.sendMessage(
+          { type: "heartbeat", url: window.location.href, title: document.title },
+          () => { if (chrome.runtime.lastError) { /* ignored */ } }
+        );
+      } catch (e) { /* context invalidated */ }
+    }
+  }, 5000);
 })();
