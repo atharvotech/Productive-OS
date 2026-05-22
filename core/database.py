@@ -22,6 +22,7 @@ _local = threading.local()
 def _get_conn() -> sqlite3.Connection:
     """Thread-local SQLite connection (SQLite is not thread-safe by default)."""
     if not hasattr(_local, "conn") or _local.conn is None:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         _local.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         _local.conn.row_factory = sqlite3.Row
         _local.conn.execute("PRAGMA journal_mode=WAL")

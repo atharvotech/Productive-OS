@@ -25,6 +25,13 @@ def _base_dir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+_show_window_callback = None
+
+def set_show_window_callback(cb):
+    global _show_window_callback
+    _show_window_callback = cb
+
+
 # ─── HTTP Static File Server (for dashboard) ──────────────────────────────
 
 class DashboardHandler(SimpleHTTPRequestHandler):
@@ -107,6 +114,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
                 return
                 
+        # Intercept IPC show-window
+        if parsed_path.path == '/ipc/show-window':
+            if _show_window_callback:
+                _show_window_callback()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok"}')
+            return
+            
         # For all other paths, serve static files
         try:
             super().do_GET()
@@ -120,7 +137,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
 def start_http_server(port: int = 8080):
     """Start the HTTP server for the dashboard in a daemon thread."""
-    dashboard_dir = os.path.join(_base_dir(), "dashboard")
+    if getattr(sys, 'frozen', False):
+        dashboard_dir = os.path.join(sys._MEIPASS, "dashboard")
+    else:
+        dashboard_dir = os.path.join(_base_dir(), "dashboard")
     handler = partial(DashboardHandler, directory=dashboard_dir)
     server = HTTPServer(("127.0.0.1", port), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

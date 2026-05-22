@@ -228,4 +228,4 @@ class AuthManager:
 # NOTE: First-run setup is now handled in the web dashboard UI.
 # The API action "first_run_setup" in api_server.py calls auth.set_password()
 # directly after the user fills the setup form in the browser.
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------

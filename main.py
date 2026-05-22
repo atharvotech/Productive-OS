@@ -11,6 +11,26 @@ Admin elevation:
   - When packaged as .exe: PyInstaller --uac-admin handles it at OS level.
   - In dev mode (python main.py): auto re-launches via ShellExecuteW if not admin.
     The re-launched console is hidden (SW_HIDE) so it runs like a background service.
+
+IPC (Single-Instance):
+  - A global mutex ("ProductiveOS_Singleton_Mutex_v3") prevents two engine
+    instances from running simultaneously.
+  - When a second instance is launched (e.g. user double-clicks the shortcut
+    while the background engine is already running via Task Scheduler), it:
+      1. Tries to focus an existing "Productive-OS" window via Win32.
+      2. If no window exists, sends GET /ipc/show-window to the running engine.
+      3. The engine's main thread receives the signal and calls open_window().
+      4. The second instance then exits immediately.
+  - This design ensures pywebview.start() always runs on the main thread of
+    the engine process, which is required on Windows.
+
+Auto-Update:
+  - A background thread checks the GitHub Releases API every 6 hours.
+  - If a newer version is detected, it downloads Productive-OS-Setup.exe
+    into %TEMP% and runs it silently (/VERYSILENT /SUPPRESSMSGBOXES
+    /FORCECLOSEAPPLICATIONS). The installer's [Code] section kills this
+    process and replaces all files; the scheduled task restarts the new
+    version on next logon.
 """
 
 import os
@@ -19,6 +39,20 @@ import time
 import ctypes
 import threading
 import argparse
+
+# ─── Version & Constants ──────────────────────────────────────────────────────
+
+APP_VERSION          = "3.6.0"
+HTTP_PORT            = 8123
+WS_PORT              = 8765
+MUTEX_NAME           = "ProductiveOS_Singleton_Mutex_v3"
+GITHUB_REPO          = "atharvotech/Productive-OS"
+GITHUB_API_URL       = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+UPDATE_CHECK_SECS    = 6 * 3600   # Check for updates every 6 hours
+
+# ─── Module-level IPC signal (set by HTTP handler, consumed by main thread) ───
+_show_window_event = threading.Event()
+
 
 # ─── Admin Elevation (dev-mode only) ─────────────────────────────────────────
 
@@ -31,39 +65,37 @@ def is_admin() -> bool:
 
 def elevate_dev(background: bool):
     """
-    Re-launch as admin when running as a plain .py script.
+    Re-launch as admin. Works for both .py scripts and frozen .exe.
     Uses SW_HIDE to suppress the console window on the re-launched process.
-    Shows a blocking message box on failure so the user sees what went wrong.
     """
-    import subprocess
-
-    script = os.path.abspath(sys.argv[0])
     extra_args = "--background" if background else ""
 
-    # Use python.exe (with visible console) in dev mode so any startup
-    # errors are visible. pythonw.exe would hide all errors silently.
-    launcher = sys.executable  # always python.exe in dev mode
+    if getattr(sys, "frozen", False):
+        launcher = sys.executable
+        args_str = extra_args
+    else:
+        launcher = sys.executable  # python.exe
+        script = os.path.abspath(sys.argv[0])
+        args_str = f'"{script}" {extra_args}'.strip()
 
     try:
         result = ctypes.windll.shell32.ShellExecuteW(
             None,
             "runas",
             launcher,
-            f'"{script}" {extra_args}'.strip(),
+            args_str,
             None,
-            0,  # SW_HIDE — run the elevated process with no visible window
+            0,  # SW_HIDE
         )
-        # ShellExecuteW returns ≤32 on failure
         if result <= 32:
             raise OSError(f"ShellExecuteW returned error code {result}")
-        # Current non-admin process exits; elevated process takes over
         sys.exit(0)
     except Exception as e:
         ctypes.windll.user32.MessageBoxW(
             0,
-            f"Productive-OS requires Administrator privileges.\n\nError: {e}\n\nPlease right-click the app and select 'Run as Administrator'.",
+            f"Productive-OS requires Administrator privileges to start the engine.\n\nError: {e}",
             "Elevation Failed",
-            0x10,  # MB_ICONERROR
+            0x10,
         )
         sys.exit(1)
 
@@ -75,6 +107,125 @@ def _base_dir() -> str:
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
+
+
+# ─── IPC: signal the running engine to show its window ───────────────────────
+
+def _ipc_show_window():
+    """
+    Called by the HTTP /ipc/show-window endpoint (from the existing engine process).
+
+    Priority:
+      1. If the "Productive-OS" window already exists → restore + focus it via Win32.
+      2. If no window exists (background engine) → set the show-window event so
+         the main thread can call open_window() on the correct thread.
+    """
+    hwnd = ctypes.windll.user32.FindWindowW(None, "Productive-OS")
+    if hwnd:
+        ctypes.windll.user32.ShowWindow(hwnd, 9)   # SW_RESTORE
+        ctypes.windll.user32.SetForegroundWindow(hwnd)
+        print("[IPC] Focused existing Productive-OS window.")
+    else:
+        _show_window_event.set()
+        print("[IPC] No window found — signalled main thread to open dashboard.")
+
+
+# ─── Auto-Update (background thread) ─────────────────────────────────────────
+
+def _parse_version(tag: str):
+    """Parse 'v3.6.0' or '3.6.0' into a comparable tuple of ints."""
+    tag = tag.lstrip("v").strip()
+    try:
+        return tuple(int(x) for x in tag.split("."))
+    except Exception:
+        return (0, 0, 0)
+
+
+def _start_auto_updater():
+    """
+    Spawn a daemon thread that periodically checks for a newer GitHub Release.
+
+    On finding one it:
+      1. Downloads Productive-OS-Setup.exe to %TEMP%.
+      2. Runs it with /VERYSILENT /SUPPRESSMSGBOXES /FORCECLOSEAPPLICATIONS.
+         The installer's [Code] section will kill this process and overwrite
+         all files. The scheduled task will restart the new version on next logon.
+    """
+    def _updater_loop():
+        import json
+        import tempfile
+        import urllib.request
+        import urllib.error
+
+        current = _parse_version(APP_VERSION)
+        print(f"  [AutoUpdate] Current version: {APP_VERSION} — checking every {UPDATE_CHECK_SECS // 3600}h")
+
+        # Stagger the first check by 60 s so it doesn't interfere with startup
+        time.sleep(60)
+
+        while True:
+            try:
+                req = urllib.request.Request(
+                    GITHUB_API_URL,
+                    headers={"User-Agent": f"Productive-OS/{APP_VERSION}"},
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+
+                tag     = data.get("tag_name", "0.0.0")
+                latest  = _parse_version(tag)
+                assets  = data.get("assets", [])
+
+                print(f"  [AutoUpdate] Latest release on GitHub: {tag}")
+
+                if latest > current:
+                    # Find the installer asset
+                    installer_asset = next(
+                        (a for a in assets if a["name"].endswith(".exe")),
+                        None,
+                    )
+                    if installer_asset:
+                        download_url = installer_asset["browser_download_url"]
+                        tmp_dir      = tempfile.mkdtemp(prefix="pos_update_")
+                        tmp_exe      = os.path.join(tmp_dir, "Productive-OS-Setup.exe")
+
+                        print(f"  [AutoUpdate] Newer version {tag} found. Downloading from {download_url} …")
+                        urllib.request.urlretrieve(download_url, tmp_exe)
+                        print(f"  [AutoUpdate] Download complete: {tmp_exe}")
+
+                        # Run silently — this will kill and replace the current process.
+                        # The Inno Setup [Code] taskkill step terminates us; the
+                        # scheduled task restarts the updated engine on next logon.
+                        import subprocess
+                        subprocess.Popen(
+                            [
+                                tmp_exe,
+                                "/VERYSILENT",
+                                "/SUPPRESSMSGBOXES",
+                                "/FORCECLOSEAPPLICATIONS",
+                                "/NORESTART",
+                            ],
+                            creationflags=subprocess.DETACHED_PROCESS
+                            | subprocess.CREATE_NEW_PROCESS_GROUP,
+                            close_fds=True,
+                        )
+                        print("  [AutoUpdate] Installer launched. Engine will be replaced.")
+                        # Nothing more to do — installer will kill this process.
+                        return
+                    else:
+                        print("  [AutoUpdate] No .exe asset found in release — skipping.")
+                else:
+                    print("  [AutoUpdate] Already on latest version.")
+
+            except urllib.error.URLError as e:
+                print(f"  [AutoUpdate] Network error: {e}")
+            except Exception as e:
+                print(f"  [AutoUpdate] Unexpected error: {e}")
+
+            time.sleep(UPDATE_CHECK_SECS)
+
+    t = threading.Thread(target=_updater_loop, daemon=True, name="AutoUpdater")
+    t.start()
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -89,21 +240,46 @@ def main():
     )
     args, _ = parser.parse_known_args()
 
-    # ── Prevent Multiple Instances ────────────────────────────────────────
+    # ── Single-Instance: focus existing window or send IPC ────────────────
     import ctypes
     import winerror
-    # Create a system-wide mutex
-    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "ProductiveOS_Singleton_Mutex_v3")
+
+    # 1. If the native window is already visible, just focus it and exit.
+    if not args.background:
+        hwnd = ctypes.windll.user32.FindWindowW(None, "Productive-OS")
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+            print("[*] Dashboard is already open. Focused existing window.")
+            sys.exit(0)
+
+    # 2. Acquire the singleton mutex.
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, MUTEX_NAME)
     if ctypes.windll.kernel32.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-        print("[*] Productive-OS is already running. Exiting.")
+        # The background engine is already running (no visible window yet).
+        if not args.background:
+            # Send an IPC signal to the running engine asking it to open the
+            # dashboard on its own main thread (pywebview requires main thread).
+            # Fall back to opening a local window if the IPC call fails.
+            import urllib.request
+            try:
+                urllib.request.urlopen(
+                    f"http://localhost:{HTTP_PORT}/ipc/show-window",
+                    timeout=3,
+                )
+                print("[*] IPC signal sent — running engine will open the dashboard.")
+            except Exception as e:
+                # Engine might not have its HTTP server up yet (race at boot).
+                # Fall back: open the webview window in this process instead.
+                print(f"[*] IPC signal failed ({e}) — opening window locally as fallback.")
+                from ui import open_window
+                open_window(HTTP_PORT)
         sys.exit(0)
 
-    # ── Elevation check (dev mode only; .exe uses --uac-admin) ────────────
-    if not getattr(sys, "frozen", False):
-        if not is_admin():
-            print("[*] Requesting Administrator privileges...")
-            elevate_dev(background=args.background)
-            return  # Current process exits; elevated child takes over
+    # ── Elevation check (We need admin to start the engine) ───────────────
+    if not is_admin():
+        elevate_dev(background=args.background)
+        return  # Current process exits; elevated child takes over
 
     # ── Engine startup ────────────────────────────────────────────────────
     from core import database as db
@@ -145,32 +321,56 @@ def main():
         shutdown.set()
 
     # ── WebSocket + HTTP servers ──────────────────────────────────────────
-    from core.api_server import start_api_server, start_http_server
+    from core.api_server import start_api_server, start_http_server, set_show_window_callback
+
+    # Register the IPC callback BEFORE starting the HTTP server so the
+    # endpoint is wired up the moment the server starts accepting connections.
+    set_show_window_callback(_ipc_show_window)
 
     api = start_api_server(
         auth=auth,
         app_killer=killer,
         tracker=tracker,
         dns_blocker=dns,
-        port=8765,
+        port=WS_PORT,
         on_shutdown=trigger_shutdown,
     )
-    # Start HTTP Server on an alternative port to avoid 8080 conflicts
-    HTTP_PORT = 8123
     try:
         start_http_server(port=HTTP_PORT)
     except Exception as e:
         print(f"[!] Failed to start HTTP server on {HTTP_PORT}: {e}")
 
+    # ── Auto-updater (production only — skip in dev/script mode) ─────────
+    if getattr(sys, "frozen", False):
+        _start_auto_updater()
+
     # ── Open dashboard UI (unless --background) ───────────────────────────
     if not args.background:
         from ui import open_window
-        # Pass the correct port to UI
-        ui_thread = threading.Thread(target=open_window, args=(HTTP_PORT,), daemon=True)
-        ui_thread.start()
+        # Run pywebview on the main thread (required on Windows).
+        open_window(HTTP_PORT, shutdown_event=shutdown)
+        # open_window() returns when the window is closed.
+        # The engine continues running in background — don't shut down here.
 
-    # ── Block until shutdown is requested ─────────────────────────────────
-    shutdown.wait()
+    # ── Main thread event loop ────────────────────────────────────────────
+    # Watches two signals:
+    #   shutdown          → graceful engine teardown
+    #   _show_window_event → IPC trigger: open/re-open the dashboard window
+    #
+    # pywebview.start() MUST be called on the main thread (Windows requirement).
+    # By watching _show_window_event here, we satisfy that constraint for IPC
+    # requests that arrive while the engine is running headlessly in background.
+    print("[*] Engine is running. Main thread entering event loop.")
+    while not shutdown.is_set():
+        if _show_window_event.wait(timeout=0.5):
+            _show_window_event.clear()
+            try:
+                from ui import open_window
+                print("[IPC] Opening dashboard window on main thread.")
+                open_window(HTTP_PORT, shutdown_event=shutdown)
+                # Returns when the user closes the window — loop continues.
+            except Exception as e:
+                print(f"[IPC] Failed to open window: {e}")
 
     # ── Graceful shutdown ─────────────────────────────────────────────────
     tracker.stop()
@@ -185,7 +385,6 @@ def main():
         pass
 
     print("[*] Shutdown complete. Terminating process.")
-    import os
     os._exit(0)
 
 

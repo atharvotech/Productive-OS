@@ -25,7 +25,7 @@ def wait_for_server(url: str, timeout: int = WAIT_TIMEOUT_SEC) -> bool:
     return False
 
 
-def open_window(port: int = 8123):
+def open_window(port: int = 8123, shutdown_event=None):
     """
     Launch the native pywebview window pointing to the Dashboard.
     Blocks until the window is closed.
@@ -48,8 +48,18 @@ def open_window(port: int = 8123):
             js_api=None,
         )
 
+        if shutdown_event:
+            import threading
+            def _watch_shutdown():
+                shutdown_event.wait()
+                try:
+                    window.destroy()
+                except:
+                    pass
+            threading.Thread(target=_watch_shutdown, daemon=True).start()
+
         # webview.start() blocks until the window is closed.
-        # Daemon thread ensures this doesn't keep the process alive.
+        # Running on main thread is REQUIRED on Windows.
         webview.start(debug=False)
 
     except ImportError:
