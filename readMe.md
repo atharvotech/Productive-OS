@@ -291,10 +291,10 @@ pip install -r requirements.txt
   Make sure you have [Inno Setup](https://jrsoftware.org/isdownload.php) installed on your system. Then run:
   ```bash
   # Compile local dev build installer
-  python build.py
+  python scripts/build.py
   
   # Or compile production installer (pulls latest release from GitHub)
-  python installer.py
+  python scripts/installer.py
   ```
   This creates `Productive-OS-Dev-Setup.exe` or `Productive-OS-Setup.exe` in the `installer/` directory. Run the executable as Administrator once. It will install the application and configure the scheduled start task.
 
@@ -306,7 +306,7 @@ If you need to uninstall the app completely, revert registry group policies, res
 
 ### Option A (Recommended)
 1. Navigate to the project root directory.
-2. Right-click [uninstall.bat](file:///c:/Users/athar/OneDrive/Desktop/Productive-OS/uninstall.bat) and choose **"Run as administrator"**.
+2. Right-click [scripts/uninstall.bat](file:///c:/Users/athar/OneDrive/Desktop/Productive-OS/scripts/uninstall.bat) and choose **"Run as administrator"**.
 3. Press any key once the wipe finishes.
 
 ### Option B (PowerShell)
@@ -314,7 +314,7 @@ If you need to uninstall the app completely, revert registry group policies, res
 2. Run the cleanup script:
    ```powershell
    Set-ExecutionPolicy Bypass -Scope Process -Force
-   .\uninstall.ps1
+   .\scripts\uninstall.ps1
    ```
 
 ---
@@ -345,10 +345,17 @@ Productive-OS/
 │
 ├── main.py                      # Master Orchestrator — entry point
 ├── ui.py                        # pywebview native window launcher
-├── build.py                     # Local dev builder (packages folders)
-├── installer.py                 # Production GitHub pull builder
-├── uninstall.bat                # One-click admin uninstall batch utility
-├── uninstall.ps1                # Admin uninstall PowerShell utility
+├── docs/                        # Documentation and resources
+│   ├── AGENT_INSTRUCTIONS.md    # Agent memory and instructions
+│   ├── EULA.txt                 # End User License Agreement
+│   └── how.txt                  # General notes
+├── scripts/                     # Utility and installation scripts
+│   ├── build.py                 # Local dev builder (packages folders)
+│   ├── installer.py             # Production GitHub pull builder
+│   ├── kill_engine.py           # Utility to forcefully stop the engine
+│   ├── graphify_step1.ps1       # Script to setup graphify
+│   ├── uninstall.bat            # One-click admin uninstall batch utility
+│   └── uninstall.ps1            # Admin uninstall PowerShell utility
 └── requirements.txt
 ```
 

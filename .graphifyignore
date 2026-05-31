@@ -1,0 +1,54 @@
+# --- Graphify Exclusions for Focus Engine Pro ---
+
+# Dependencies & Environments (Never index virtual environments)
+venv/
+env/
+.env
+.venv
+
+# Python artifacts & caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*$py.class
+
+# Temporary development & testing files
+_temp_tracker.py
+_window_dump.json
+_window_dump.txt
+_check_time.py
+_clean_stale.py
+_style_dump.json
+scratch_check_8080.py
+scratch_search.py
+
+# Database & State files
+core/data.db
+core/database.sqlite
+*.db
+*.sqlite
+core/data.db-shm
+core/data.db-wal
+core/admin_config.json
+*.json.lock
+
+# IDE & Tool configs
+.vscode/
+.antigravity/
+.idea/
+.agents/
+graphify-out/
+
+# Build & System artifacts
+dist/
+build/
+_build_src/
+installer/
+*.spec
+*.exe
+*.msi
+dev_setup.iss
+prod_setup.iss
+Thumbs.db
+desktop.ini

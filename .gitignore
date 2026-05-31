@@ -61,3 +61,7 @@ _build_src/
 dev_setup.iss
 prod_setup.iss
 *.spec
+
+#AI 
+graphify-out/
+.agents/

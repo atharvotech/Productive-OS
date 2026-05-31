@@ -22,7 +22,7 @@ for proc in psutil.process_iter(['pid', 'name']):
 if killed > 0:
     time.sleep(1.5)
 
-dist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist", "Productive-OS-dev")
+dist_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dist", "Productive-OS-dev")
 if os.path.exists(dist_path):
     print(f"[*] Cleaning {dist_path}...")
     try:

@@ -35,7 +35,7 @@ from datetime import datetime
 REPO_URL      = "https://github.com/atharvotech/Productive-OS"
 REPO_BRANCH   = "main"
 
-BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STAGE_DIR     = os.path.join(BASE_DIR, "_build_src")   # staging clone
 DIST_DIR      = os.path.join(BASE_DIR, "dist")
 BUILD_DIR     = os.path.join(BASE_DIR, "build")
@@ -43,7 +43,7 @@ INSTALLER_DIR = os.path.join(BASE_DIR, "installer")
 
 APP_NAME      = "Productive-OS"
 EXE_NAME      = "Productive-OS"                         # dist/Productive-OS/ folder
-ISS_FILE      = os.path.join(BASE_DIR, "prod_setup.iss")
+ISS_FILE      = os.path.join(BUILD_DIR, "prod_setup.iss")
 OUTPUT_NAME   = "Productive-OS-Setup"
 
 ISCC_CANDIDATES = [
@@ -235,7 +235,7 @@ def _run_pyinstaller(stage_root: str):
         # Write outputs back to the main project's dirs
         f"--distpath={DIST_DIR}",
         f"--workpath={BUILD_DIR}",
-        f"--specpath={BASE_DIR}",
+        f"--specpath={BUILD_DIR}",
     ]
 
     result = subprocess.run(args, cwd=stage_root)
@@ -322,7 +322,7 @@ def _generate_iss(exe_dir: str, exe_path: str, version: str):
         ; ── License ──────────────────────────────────────────────────────
         ; LicenseFile forces an 'I Accept / I Do Not Accept' page.
         ; The user CANNOT click Next until they select 'I Accept'.
-        LicenseFile={os.path.join(BASE_DIR, 'EULA.txt')}
+        LicenseFile={os.path.join(BASE_DIR, 'docs', 'EULA.txt')}
         DisableProgramGroupPage=no
         AllowCancelDuringInstall=yes
         ShowLanguageDialog=no

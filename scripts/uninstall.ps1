@@ -119,6 +119,8 @@ Write-Host "[*] Cleaning local workspace build outputs..." -ForegroundColor Yell
 $repoPath = $PSScriptRoot
 if ([string]::IsNullOrEmpty($repoPath)) {
     $repoPath = "C:\Users\athar\OneDrive\Desktop\Productive-OS"
+} else {
+    $repoPath = Split-Path -Parent $repoPath
 }
 $devPaths = @(
     "_window_dump.json",

@@ -71,14 +71,14 @@ echo   [OK] App folders and databases removed.
 
 echo.
 echo [*] Cleaning temporary debug logs in repository...
-del /f /q "%~dp0_window_dump.json" >nul 2>&1
-del /f /q "%~dp0_window_dump.txt" >nul 2>&1
-del /f /q "%~dp0_style_dump.json" >nul 2>&1
-del /f /q "%~dp0_check_time.py" >nul 2>&1
-del /f /q "%~dp0_clean_stale.py" >nul 2>&1
-del /f /q "%~dp0_temp_tracker.py" >nul 2>&1
-del /f /q "%~dp0scratch_check_8080.py" >nul 2>&1
-del /f /q "%~dp0scratch_search.py" >nul 2>&1
+del /f /q "%~dp0..\_window_dump.json" >nul 2>&1
+del /f /q "%~dp0..\_window_dump.txt" >nul 2>&1
+del /f /q "%~dp0..\_style_dump.json" >nul 2>&1
+del /f /q "%~dp0..\_check_time.py" >nul 2>&1
+del /f /q "%~dp0..\_clean_stale.py" >nul 2>&1
+del /f /q "%~dp0..\_temp_tracker.py" >nul 2>&1
+del /f /q "%~dp0..\scratch_check_8080.py" >nul 2>&1
+del /f /q "%~dp0..\scratch_search.py" >nul 2>&1
 echo   [OK] Debug dumps cleaned.
 
 echo.

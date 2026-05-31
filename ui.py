@@ -30,7 +30,7 @@ def open_window(port: int = 8123, shutdown_event=None):
     Launch the native pywebview window pointing to the Dashboard.
     Blocks until the window is closed.
     """
-    url = f"http://localhost:{port}"
+    url = f"http://127.0.0.1:{port}"
     # Wait for the Python HTTP server to spin up
     if not wait_for_server(url):
         print(f"  [!] Timeout waiting for UI server at {url}")

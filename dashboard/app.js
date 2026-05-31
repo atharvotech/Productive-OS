@@ -12,7 +12,7 @@
 // Configuration
 // ═══════════════════════════════════════════════════════════
 
-const WS_URL = "ws://localhost:8765";
+const WS_URL = "ws://127.0.0.1:8765";
 const CATEGORY_COLORS = {
     study:         { bg: "rgba(16, 185, 129, 0.7)",  border: "#10b981" },
     gaming:        { bg: "rgba(239, 68, 68, 0.7)",   border: "#ef4444" },

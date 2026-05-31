@@ -17,7 +17,7 @@
 
 // ─── Configuration ───────────────────────────────────────────────────────
 
-const WS_URL = "ws://localhost:8765";
+const WS_URL = "ws://127.0.0.1:8765";
 const SYNC_INTERVAL_SEC = 30;
 const FOCUS_CHECK_INTERVAL_SEC = 15;
 

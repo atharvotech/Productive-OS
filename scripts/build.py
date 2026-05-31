@@ -28,7 +28,7 @@ import textwrap
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 
-BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENTRY_POINT   = os.path.join(BASE_DIR, "main.py")
 DASHBOARD_DIR = os.path.join(BASE_DIR, "dashboard")
 EXTENSION_DIR = os.path.join(BASE_DIR, "extension")
@@ -39,7 +39,7 @@ INSTALLER_DIR = os.path.join(BASE_DIR, "installer")
 
 APP_NAME      = "Productive-OS (Dev Build)"
 EXE_NAME      = "Productive-OS-dev"          # dist/Productive-OS-dev/ folder
-ISS_FILE      = os.path.join(BASE_DIR, "dev_setup.iss")
+ISS_FILE      = os.path.join(BUILD_DIR, "dev_setup.iss")
 OUTPUT_NAME   = "Productive-OS-Dev-Setup"    # final installer filename
 
 # Common Inno Setup search locations
@@ -147,7 +147,7 @@ def _run_pyinstaller():
         # Output locations
         f"--distpath={DIST_DIR}",
         f"--workpath={BUILD_DIR}",
-        f"--specpath={BASE_DIR}",
+        f"--specpath={BUILD_DIR}",
     ]
 
     result = subprocess.run(args, cwd=BASE_DIR)
@@ -206,7 +206,7 @@ def _generate_iss(exe_dir: str, exe_path: str):
         UninstallDisplayIcon={{app}}\\{{#MyAppExeName}}
         SetupIconFile=
         ; ── License ──────────────────────────────────────────────────────
-        LicenseFile={os.path.join(BASE_DIR, 'EULA.txt')}
+        LicenseFile={os.path.join(BASE_DIR, 'docs', 'EULA.txt')}
         DisableProgramGroupPage=no
         AllowCancelDuringInstall=yes
         ShowLanguageDialog=no

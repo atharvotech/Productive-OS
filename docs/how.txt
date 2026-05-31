@@ -1,0 +1,9 @@
+start venv
+./.venv/scripts/activate
+
+graphify start watching
+Get-Content .env | Foreach-Object { $name, $value = $_.Split('=', 2); if($name) { [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim().Trim('"'), "Process") } }; graphify watch .
+
+
+graphify update chart
+Get-Content .env | Foreach-Object { $name, $value = $_.Split('=', 2); if($name) { [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim().Trim('"'), "Process") } }; graphify update .
