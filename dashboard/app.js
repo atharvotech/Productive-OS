@@ -14,13 +14,13 @@
 
 const WS_URL = "ws://127.0.0.1:8765";
 const CATEGORY_COLORS = {
-    study:         { bg: "rgba(16, 185, 129, 0.7)",  border: "#10b981" },
-    gaming:        { bg: "rgba(239, 68, 68, 0.7)",   border: "#ef4444" },
-    social:        { bg: "rgba(236, 72, 153, 0.7)",  border: "#ec4899" },
-    entertainment: { bg: "rgba(124, 58, 237, 0.7)",  border: "#7c3aed" },
-    productivity:  { bg: "rgba(6, 182, 212, 0.7)",   border: "#06b6d4" },
-    idle:          { bg: "rgba(255, 255, 255, 0.1)",  border: "#555" },
-    other:         { bg: "rgba(245, 158, 11, 0.7)",  border: "#f59e0b" },
+    study: { bg: "rgba(16,  185, 129, 0.72)", border: "#10b981" },
+    gaming: { bg: "rgba(244, 63,  94,  0.72)", border: "#f43f5e" },
+    social: { bg: "rgba(236, 72,  153, 0.72)", border: "#ec4899" },
+    entertainment: { bg: "rgba(99,  102, 241, 0.72)", border: "#818cf8" },
+    productivity: { bg: "rgba(34,  211, 238, 0.72)", border: "#22d3ee" },
+    idle: { bg: "rgba(255, 255, 255, 0.08)", border: "rgba(255,255,255,0.2)" },
+    other: { bg: "rgba(245, 158, 11,  0.72)", border: "#f59e0b" },
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -388,7 +388,7 @@ function renderStats(data) {
         localStorage.setItem("_cached_stats", JSON.stringify({
             studyTime, totalScreen, tokenBalance, streak, ts: Date.now()
         }));
-    } catch (_) {}
+    } catch (_) { }
 
     // Daily activity bar chart
     renderDailyActivityChart(data.hourly || []);
@@ -411,9 +411,20 @@ let webCategoriesChart = null;
 let tokenHistoryChart = null;
 
 // Chart.js global defaults
-Chart.defaults.color = "rgba(240, 240, 245, 0.6)";
-Chart.defaults.borderColor = "rgba(255, 255, 255, 0.06)";
-Chart.defaults.font.family = "'Inter', sans-serif";
+Chart.defaults.color = "rgba(238, 240, 248, 0.55)";
+Chart.defaults.borderColor = "rgba(255, 255, 255, 0.055)";
+Chart.defaults.font.family = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
+Chart.defaults.font.size = 12;
+Chart.defaults.plugins.tooltip.backgroundColor = "rgba(11, 14, 26, 0.92)";
+Chart.defaults.plugins.tooltip.borderColor = "rgba(255,255,255,0.10)";
+Chart.defaults.plugins.tooltip.borderWidth = 1;
+Chart.defaults.plugins.tooltip.padding = 10;
+Chart.defaults.plugins.tooltip.cornerRadius = 10;
+Chart.defaults.plugins.tooltip.titleFont = { family: "'Inter', sans-serif", weight: "700", size: 12 };
+Chart.defaults.plugins.tooltip.bodyFont = { family: "'Inter', sans-serif", size: 11 };
+Chart.defaults.plugins.legend.labels.usePointStyle = true;
+Chart.defaults.plugins.legend.labels.pointStyle = "circle";
+Chart.defaults.plugins.legend.labels.pointStyleWidth = 7;
 
 function renderDailyActivityChart(hourly) {
     const ctx = document.getElementById("chart-daily-activity");
@@ -585,23 +596,23 @@ function renderTopApps(apps) {
     if (tableContainer && apps.length > 0) {
         let html = `<table class="data-table">
             <thead><tr><th>App</th><th>Category</th><th>Time</th></tr></thead><tbody>`;
-        
+
         apps.forEach((a, idx) => {
             const hasSub = a.sub_items && a.sub_items.length > 0;
             const chevron = hasSub ? `<span class="chevron" onclick="toggleSubRows('sub-${idx}')" style="cursor:pointer; font-weight:bold; color:var(--text-muted); margin-right:8px;">[+]</span>` : `<span style="display:inline-block; width:22px;"></span>`;
-            
+
             html += `<tr>
                 <td style="display:flex; align-items:center;">${chevron} ${a.app_name}</td>
                 <td><span class="activity-category ${a.category}">${a.category}</span></td>
                 <td>${formatTime(a.total_sec)}</td>
             </tr>`;
-            
+
             if (hasSub) {
                 html += `<tr id="sub-${idx}" style="display:none; background: rgba(0,0,0,0.15);">
                     <td colspan="3" style="padding: 0;">
                         <table style="width:100%; border-collapse:collapse; background:transparent;">
                             <tbody>`;
-                
+
                 a.sub_items.sort((x, y) => y.total_sec - x.total_sec).forEach(sub => {
                     html += `<tr>
                         <td style="padding: 8px 16px 8px 38px; color:var(--text-muted);">- ${sub.app_name}</td>
@@ -609,7 +620,7 @@ function renderTopApps(apps) {
                         <td style="padding: 8px 16px; color:var(--text-muted);">${formatTime(sub.total_sec)}</td>
                     </tr>`;
                 });
-                
+
                 html += `       </tbody>
                         </table>
                     </td>
@@ -618,10 +629,10 @@ function renderTopApps(apps) {
         });
         html += `</tbody></table>`;
         tableContainer.innerHTML = html;
-        
+
         // Add toggle function if missing
         if (!window.toggleSubRows) {
-            window.toggleSubRows = function(id) {
+            window.toggleSubRows = function (id) {
                 const el = document.getElementById(id);
                 if (el) {
                     el.style.display = el.style.display === "none" ? "table-row" : "none";
@@ -796,7 +807,7 @@ function renderHeatmap(hourly) {
     let html = '<div class="hourly-heatmap">';
     hourly.forEach(h => {
         const total = (h.study || 0) + (h.gaming || 0) + (h.social || 0) +
-                      (h.entertainment || 0) + (h.productivity || 0) + (h.other || 0);
+            (h.entertainment || 0) + (h.productivity || 0) + (h.other || 0);
         const intensity = Math.min(total / 3600, 1);
 
         const cats = { study: h.study || 0, gaming: h.gaming || 0, entertainment: h.entertainment || 0 };
@@ -807,9 +818,9 @@ function renderHeatmap(hourly) {
         } else if (dominant[0] === "study") {
             color = `rgba(16, 185, 129, ${0.15 + intensity * 0.65})`;
         } else if (dominant[0] === "gaming") {
-            color = `rgba(239, 68, 68, ${0.15 + intensity * 0.65})`;
+            color = `rgba(244, 63, 94, ${0.15 + intensity * 0.65})`;
         } else {
-            color = `rgba(124, 58, 237, ${0.15 + intensity * 0.65})`;
+            color = `rgba(99, 102, 241, ${0.15 + intensity * 0.65})`;
         }
 
         html += `<div class="heatmap-cell" style="background:${color}">
@@ -960,7 +971,7 @@ function renderTokenLog(history) {
         const time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString() : "";
         const type = t.earned > 0 ? "Earned" : "Spent";
         const amount = t.earned > 0 ? `+${t.earned}` : `-${t.spent}`;
-        const color = t.earned > 0 ? "var(--accent-green)" : "var(--accent-red)";
+        const color = t.earned > 0 ? "var(--green)" : "var(--red)";
         html += `<tr>
             <td>${time}</td>
             <td>${type}</td>
@@ -1001,13 +1012,13 @@ function renderTokenChart(history) {
                     {
                         label: "Earned",
                         data: earned,
-                        backgroundColor: "rgba(16, 185, 129, 0.6)",
+                        backgroundColor: "rgba(16, 185, 129, 0.65)",
                         borderRadius: 4,
                     },
                     {
                         label: "Spent",
                         data: spent,
-                        backgroundColor: "rgba(239, 68, 68, 0.6)",
+                        backgroundColor: "rgba(244, 63, 94, 0.65)",
                         borderRadius: 4,
                     },
                 ],
@@ -1317,8 +1328,10 @@ document.addEventListener("DOMContentLoaded", () => {
         showPasswordModal("🔐 Admin Password", "Enter password to update YouTube whitelist.",
             (verified) => {
                 if (verified) {
-                    sendWS({ action: "update_settings", password: document.getElementById("modal-password").value,
-                        settings: { whitelisted_channels: channels } });
+                    sendWS({
+                        action: "update_settings", password: document.getElementById("modal-password").value,
+                        settings: { whitelisted_channels: channels }
+                    });
                     closeModal();
                 }
             }
@@ -1334,7 +1347,8 @@ document.addEventListener("DOMContentLoaded", () => {
         showPasswordModal("🔐 Admin Password", "Enter password to update rates & timers.",
             (verified) => {
                 if (verified) {
-                    sendWS({ action: "update_settings", password: document.getElementById("modal-password").value,
+                    sendWS({
+                        action: "update_settings", password: document.getElementById("modal-password").value,
                         settings: {
                             token_earn_rate: earnRate,
                             token_deduct_rate: deductRate,
@@ -1454,10 +1468,10 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("btn-yt-search")?.addEventListener("click", async () => {
         const query = document.getElementById("yt-search-input")?.value?.trim();
         if (!query) return;
-        
+
         const resultsContainer = document.getElementById("yt-search-results");
         resultsContainer.innerHTML = `<div class="yt-search-loading">Searching YouTube</div>`;
-        
+
         try {
             // Use local Python backend first, then fallback to Invidious if it fails
             const instances = [
@@ -1466,7 +1480,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 "https://inv.nadeko.net",
                 "https://invidious.snopyta.org",
             ];
-            
+
             let data = null;
             for (const instance of instances) {
                 try {
@@ -1481,23 +1495,23 @@ document.addEventListener("DOMContentLoaded", () => {
                     continue;
                 }
             }
-            
+
             if (!data || data.length === 0) {
                 resultsContainer.innerHTML = `<p class="empty-text">No channels found. Try a different search term, or type the channel name manually in the textarea above.</p>`;
                 return;
             }
-            
+
             // Get current whitelisted channels for "already added" check
             const currentChannels = (document.getElementById("whitelisted-channels")?.value || "")
                 .split("\n").map(c => c.trim().toLowerCase()).filter(Boolean);
-            
+
             resultsContainer.innerHTML = data.slice(0, 8).map(ch => {
                 const name = ch.author || ch.name || "Unknown Channel";
                 const desc = ch.description?.substring(0, 100) || `${(ch.subCount || 0).toLocaleString()} subscribers`;
                 const thumb = ch.authorThumbnails?.[0]?.url || "";
                 const thumbSrc = thumb.startsWith("//") ? "https:" + thumb : thumb;
                 const isAdded = currentChannels.includes(name.toLowerCase());
-                
+
                 return `
                 <div class="yt-result-card">
                     <img class="yt-result-thumb" src="${thumbSrc}" alt="" onerror="this.style.display='none'">
@@ -1512,7 +1526,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     </button>
                 </div>`;
             }).join("");
-            
+
             // Attach click handlers to Add buttons
             resultsContainer.querySelectorAll(".yt-result-btn:not(.added)").forEach(btn => {
                 btn.addEventListener("click", () => {
@@ -1526,13 +1540,13 @@ document.addEventListener("DOMContentLoaded", () => {
                     showToast(`Added "${channelName}" to whitelist`, "success");
                 });
             });
-            
+
         } catch (err) {
             resultsContainer.innerHTML = `<p class="empty-text">Search failed. You can type channel names manually in the textarea above.</p>`;
             console.error("YT search error:", err);
         }
     });
-    
+
     // Enter key in YT search
     document.getElementById("yt-search-input")?.addEventListener("keydown", (e) => {
         if (e.key === "Enter") document.getElementById("btn-yt-search")?.click();
@@ -1624,10 +1638,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (submitBtn) {
         submitBtn.addEventListener("click", () => {
             const password = document.getElementById("setup-password")?.value?.trim() || "";
-            const confirm  = document.getElementById("setup-password-confirm")?.value?.trim() || "";
-            const qIndex   = parseInt(document.getElementById("setup-security-question")?.value ?? "0");
-            const answer   = document.getElementById("setup-security-answer")?.value?.trim() || "";
-            const errorEl  = document.getElementById("first-run-error");
+            const confirm = document.getElementById("setup-password-confirm")?.value?.trim() || "";
+            const qIndex = parseInt(document.getElementById("setup-security-question")?.value ?? "0");
+            const answer = document.getElementById("setup-security-answer")?.value?.trim() || "";
+            const errorEl = document.getElementById("first-run-error");
 
             const showError = (msg) => {
                 if (errorEl) { errorEl.textContent = msg; errorEl.classList.remove("hidden"); }
@@ -1676,5 +1690,5 @@ document.addEventListener("DOMContentLoaded", () => {
             animateNumber("stat-tokens", cached.tokenBalance);
             animateNumber("stat-streak", cached.streak);
         }
-    } catch (_) {}
+    } catch (_) { }
 });
