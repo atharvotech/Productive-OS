@@ -38,12 +38,16 @@ def open_window(port: int = 8123, shutdown_event=None):
     try:
         import webview  # pywebview package
 
+        import os
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "logo.ico")
+        
         window = webview.create_window(
             title="Productive-OS",
             url=url,
             width=1300,
             height=840,
             min_size=(960, 620),
+            icon=icon_path,
             # Allow JavaScript to call Python APIs if needed in the future
             js_api=None,
         )

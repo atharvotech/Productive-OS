@@ -213,6 +213,7 @@ def _run_pyinstaller(stage_root: str):
         "--noconsole",
         "--clean",
         "--noconfirm",
+        f"--icon={os.path.join(BASE_DIR, 'scripts', 'logo.ico')}",
 
         # Embed runtime assets from staged source
         f"--add-data={dashboard}{SEP}dashboard",
@@ -319,6 +320,7 @@ def _generate_iss(exe_dir: str, exe_path: str, version: str):
         ArchitecturesInstallIn64BitMode=x64compatible
         UninstallDisplayName={{#MyAppName}}
         UninstallDisplayIcon={{app}}\\{{#MyAppExeName}}
+        SetupIconFile={os.path.join(BASE_DIR, 'scripts', 'logo.ico')}
         ; ── License ──────────────────────────────────────────────────────
         ; LicenseFile forces an 'I Accept / I Do Not Accept' page.
         ; The user CANNOT click Next until they select 'I Accept'.

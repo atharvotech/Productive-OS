@@ -125,6 +125,7 @@ def _run_pyinstaller():
         "--noconsole",
         "--clean",
         "--noconfirm",
+        f"--icon={os.path.join(BASE_DIR, 'scripts', 'logo.ico')}",
 
         # Embed runtime assets
         f"--add-data={DASHBOARD_DIR}{SEP}dashboard",
@@ -204,7 +205,7 @@ def _generate_iss(exe_dir: str, exe_path: str):
         ArchitecturesInstallIn64BitMode=x64compatible
         UninstallDisplayName={{#MyAppName}}
         UninstallDisplayIcon={{app}}\\{{#MyAppExeName}}
-        SetupIconFile=
+        SetupIconFile={os.path.join(BASE_DIR, 'scripts', 'logo.ico')}
         ; ── License ──────────────────────────────────────────────────────
         LicenseFile={os.path.join(BASE_DIR, 'docs', 'EULA.txt')}
         DisableProgramGroupPage=no
