@@ -2,13 +2,13 @@
 
 <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?style=for-the-badge&logo=windows&logoColor=white"/>
 <img src="https://img.shields.io/badge/Python-3.8+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
-<img src="https://img.shields.io/badge/Version-3.7--(beta)-blueviolet?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/Version-4.0-blueviolet?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge"/>
 
 <br/><br/>
 
-# 🧠 Productive-OS v3.7 (beta)
+# 🧠 Productive-OS v4.0
 ### *Your AI-Powered Study Partner — Not Just Another Website Blocker*
 
 > **The only Windows productivity tool that locks down your entire system at the OS level, rewards your focus with real tokens, detects games dynamically, and fights back when you try to cheat.**
@@ -24,7 +24,7 @@
 ## 📋 Table of Contents
 
 1. [Why Productive-OS Is Different](#-why-productive-os-is-different)
-2. [What's New in v3.7 (beta)](#-whats-new-in-v37-beta)
+2. [What's New in v4.0](#-whats-new-in-v40)
 3. [Feature Breakdown](#-feature-breakdown)
 4. [System Architecture](#-system-architecture)
 5. [Tech Stack](#-tech-stack)
@@ -53,6 +53,18 @@ Instead of playing nice, it digs deep into your Windows system. It:
 - 🔒 Locks itself behind an admin password with a **self-healing watchdog** process
 
 When you actually study? It **rewards** you — with a token economy that unlocks real game time. Focus stops being a punishment. It becomes a game you can win.
+
+---
+
+## 🆕 What's New in v4.0
+
+### 🎨 Futuristic UI Overhaul & Glassmorphism Design
+The entire dashboard has been redesigned from the ground up to provide an ultra-premium, "Apple-quality" aesthetic:
+- **Glassmorphism Base**: Deep dark backgrounds with floating cards that utilize backdrop-filter blur and subtle transparency.
+- **Dynamic OS Theme Adaptation**: Seamlessly switches between a mid-dark slate/charcoal gradient in Dark Mode and a clean off-white pearl base with icy-blue gradients in Light Mode, adapting automatically to your Windows theme.
+- **Zero CPU Overhead Backgrounds**: 100% static CSS radial gradients ensure that the UI looks stunning without wasting any system resources or draining battery.
+- **Premium Typography & Micro-animations**: Upgraded to the 'Inter' font family with smooth easing transitions on all hover states and interactive elements.
+- **Enhanced Category Selection UX**: Improved affordance for chart legends—users can now easily distinguish selected vs. unselected categories with smooth opacity transitions, making data filtering intuitive.
 
 ---
 
@@ -487,6 +499,7 @@ The engine gracefully falls back to a lightweight 3-second polling loop (trackin
 - [x] **v3.5**: Background headless engine, 10s flush, Spotify fix, web date filter
 - [x] **v3.6**: Event-driven WMI game detection, Google Play Games, emulator blocking, critical bug fixes, singleton mutex
 - [x] **v3.7 (beta)**: Decoupled UI launcher, Scheduled Task startup, folder distribution, auto-update mechanism, dedicated uninstaller scripts
+- [x] **v4.0**: Futuristic UI Overhaul, dynamic OS themes, improved category UX, glassmorphism design system
 
 ### 🔜 Upcoming
 - [ ] **Pomodoro Mode** — enforced 25/5 break timers with mandatory lock screen
@@ -531,7 +544,7 @@ This is a personal project and is currently closed for external distribution or 
 
 <br/>
 
-<img src="https://img.shields.io/badge/Version-3.7--(beta)-blueviolet?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/Version-4.0-blueviolet?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Built%20in-India-FF9933?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Powered%20by-Python-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
 
