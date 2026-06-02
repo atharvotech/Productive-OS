@@ -291,7 +291,7 @@ function handleError(data) {
 // ═══════════════════════════════════════════════════════════
 
 function refreshAllData() {
-    const today = new Date().toISOString().split("T")[0];
+    const today = getLocalDateString();
     sendWS({ action: "get_stats", period: "day", date: today });
     sendWS({ action: "get_tokens" });
     sendWS({ action: "get_focus_mode" });
@@ -319,6 +319,10 @@ setInterval(() => {
 // ═══════════════════════════════════════════════════════════
 // Helper Functions
 // ═══════════════════════════════════════════════════════════
+
+function getLocalDateString(d = new Date()) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 function formatTime(seconds) {
     if (!seconds || seconds <= 0) return "0m";
@@ -931,8 +935,10 @@ function renderSpotifyHistory(history, listeningSeconds) {
 // ─── Tokens ──────────────────────────────────────────────────────────────
 
 function renderTokens(data) {
-    animateNumber("stat-tokens", data.balance || 0);
-    animateNumber("token-balance-large", data.balance || 0);
+    const balance = Math.max(0, data.balance || 0);
+    animateNumber("stat-tokens", balance);
+    animateNumber("token-balance-large", balance);
+
 
     const history = data.history || [];
     renderTokenLog(history);
@@ -1174,7 +1180,7 @@ function navigateTo(page) {
     });
 
     // Refresh page-specific data on navigation
-    const today = new Date().toISOString().split("T")[0];
+    const today = getLocalDateString();
     if (page === "screentime") {
         sendWS({ action: "get_top_apps", date: today });
         sendWS({ action: "get_hourly", date: today });
@@ -1222,8 +1228,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const period = btn.dataset.period;
             const today = new Date();
             if (period === "day") {
-                sendWS({ action: "get_top_apps", date: today.toISOString().split("T")[0] });
-                sendWS({ action: "get_hourly", date: today.toISOString().split("T")[0] });
+                sendWS({ action: "get_top_apps", date: getLocalDateString(today) });
+                sendWS({ action: "get_hourly", date: getLocalDateString(today) });
             } else if (period === "month") {
                 sendWS({ action: "get_monthly", year: today.getFullYear(), month: today.getMonth() + 1 });
             } else if (period === "year") {

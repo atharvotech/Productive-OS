@@ -1121,24 +1121,29 @@ class ActivityTracker:
             print(f"  [!] Tracker flush error (will retry next cycle): {e}")
 
     def _process_tokens(self):
-        """Earn tokens for study, deduct for gaming."""
-        if self._study_accumulator >= 60:
-            minutes_studied = self._study_accumulator / 60
-            self._study_token_fraction += minutes_studied * (self._token_earn_rate / 60)
+        """Earn tokens for study (always), deduct for gaming (only in study/productive mode)."""
+        # ── Study tokens: earn whenever studying, regardless of mode ─────────
+        if self._study_accumulator > 0:
+            minutes_studied = self._study_accumulator / 60.0
+            self._study_token_fraction += minutes_studied * (self._token_earn_rate / 60.0)
             whole_tokens = int(self._study_token_fraction)
             if whole_tokens > 0:
                 db.earn_tokens(whole_tokens, "study_time")
+                print(f"[*] Study tokens earned: +{whole_tokens} (studied {minutes_studied:.1f} min)")
                 self._study_token_fraction -= whole_tokens
             self._study_accumulator = 0
 
-        if self._gaming_accumulator >= 60:
-            minutes_gamed = self._gaming_accumulator / 60
-            self._gaming_token_fraction += minutes_gamed * (self._token_deduct_rate / 60)
+        # ── Gaming tokens: only deduct when focus mode is active (study or productive) ──
+        if self._gaming_accumulator > 0 and self._current_mode in ("study", "productive"):
+            minutes_gamed = self._gaming_accumulator / 60.0
+            self._gaming_token_fraction += minutes_gamed * (self._token_deduct_rate / 60.0)
             whole_tokens = int(self._gaming_token_fraction)
             if whole_tokens > 0:
                 db.spend_tokens(whole_tokens, "gaming_time")
+                print(f"[*] Gaming tokens deducted: -{whole_tokens} (gamed {minutes_gamed:.1f} min)")
                 self._gaming_token_fraction -= whole_tokens
-            self._gaming_accumulator = 0
+        # Always reset gaming accumulator (even if not deducting)
+        self._gaming_accumulator = 0
 
     def on_study_media_tick(self, seconds: int):
         """Called by api_server when extension confirms study video is playing.

@@ -431,7 +431,8 @@ def get_token_balance() -> int:
     row = conn.execute(
         "SELECT COALESCE(SUM(earned) - SUM(spent), 0) as balance FROM tokens"
     ).fetchone()
-    return row["balance"] if row else 0
+    balance = row["balance"] if row else 0
+    return max(0, balance)  # Safety: never return negative
 
 
 def earn_tokens(amount: int, reason: str = "study"):
@@ -447,12 +448,23 @@ def earn_tokens(amount: int, reason: str = "study"):
 
 
 def spend_tokens(amount: int, reason: str = "gaming"):
+    """Spend tokens, capped at the current balance so it never goes negative."""
+    if amount <= 0:
+        return
     now = datetime.datetime.now()
     def _write():
         conn = _get_conn()
+        # Clamp to available balance so tokens can never go negative
+        row = conn.execute(
+            "SELECT COALESCE(SUM(earned) - SUM(spent), 0) as balance FROM tokens"
+        ).fetchone()
+        current_balance = max(0, row["balance"] if row else 0)
+        clamped = min(amount, current_balance)
+        if clamped <= 0:
+            return  # Nothing to spend
         conn.execute(
             "INSERT INTO tokens(date, earned, spent, reason) VALUES(?, 0, ?, ?)",
-            (now.strftime("%Y-%m-%d"), amount, reason),
+            (now.strftime("%Y-%m-%d"), clamped, reason),
         )
         conn.commit()
     _retry_write(_write)
@@ -500,7 +512,9 @@ def update_daily_summary(date: str):
     def _write():
         conn = _get_conn()
         cats = get_category_totals(date)
-        total = sum(cats.values())
+        # Exclude "idle" from the total — idle means no active foreground window,
+        # so it must not inflate the reported screen-time figure.
+        total = sum(v for k, v in cats.items() if k != "idle")
         token_row = conn.execute(
             "SELECT COALESCE(SUM(earned),0) as e, COALESCE(SUM(spent),0) as s FROM tokens WHERE date=?",
             (date,),
