@@ -97,6 +97,17 @@ def _check_deps():
     except ImportError:
         _fail("pywebview not found. Run: pip install pywebview")
 
+    try:
+        import PIL  # noqa: F401
+        _ok("Pillow found")
+    except ImportError:
+        print("  [pip] Pillow not found. Installing Pillow (required for icon validation)...")
+        r = subprocess.run([sys.executable, "-m", "pip", "install", "Pillow", "--quiet"])
+        if r.returncode == 0:
+            _ok("Pillow installed successfully")
+        else:
+            _fail("Pillow not found and failed to install. Run: pip install Pillow")
+
 
 # ─── Stage 1: PyInstaller ─────────────────────────────────────────────────────
 
