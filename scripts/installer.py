@@ -117,7 +117,22 @@ def _fetch_source() -> str:
     """Clone or update the repository into STAGE_DIR. Returns the staged root."""
     _step(f"Fetching latest source from GitHub\n  URL: {REPO_URL}\n  Branch: {REPO_BRANCH}")
 
+    is_valid_repo = False
     if os.path.isdir(os.path.join(STAGE_DIR, ".git")):
+        try:
+            # Check if STAGE_DIR is a valid git repository and not traversing up to the parent directory
+            r = subprocess.run(
+                ["git", "-C", STAGE_DIR, "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, check=True
+            )
+            repo_top = os.path.realpath(r.stdout.strip())
+            stage_real = os.path.realpath(STAGE_DIR)
+            if repo_top == stage_real:
+                is_valid_repo = True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
+    if is_valid_repo:
         # Repo already cloned — fetch + hard reset to latest
         print("  [git] Repository exists — pulling latest changes...")
         cmds = [
@@ -132,7 +147,12 @@ def _fetch_source() -> str:
     else:
         # Fresh clone
         if os.path.exists(STAGE_DIR):
-            shutil.rmtree(STAGE_DIR)
+            print(f"  [git] Removing existing invalid/stale staging directory: {STAGE_DIR}")
+            def _remove_readonly(func, path, excinfo):
+                import stat
+                os.chmod(path, stat.S_IWRITE)
+                func(path)
+            shutil.rmtree(STAGE_DIR, onerror=_remove_readonly)
         print(f"  [git] Cloning into {STAGE_DIR}...")
         r = subprocess.run(
             ["git", "clone", "--branch", REPO_BRANCH, "--depth", "1",
