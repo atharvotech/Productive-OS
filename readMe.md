@@ -537,7 +537,7 @@ The developers are not responsible for system lockouts or data loss caused by ma
 
 <div align="center">
 
-<h2>Made with ❤️ in INDIA By <i>ATHARVOTECH™ — THE WORLD OF INFINITE CREATIVITY</i></h2>
+<h2>Made with ❤️ in INDIA By <i>ATHARVOTECH™ — Building the tools you didn't know you needed</i></h2>
 
 © 2026 Atharvotech™ (Atharv Shukla). All Rights Reserved.  
 This is a personal project and is currently closed for external distribution or modification.
